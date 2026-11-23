@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::i18n::{t, tf};
 
-pub const MONO_SIZE: f32 = 13.0;
+pub const MONO_SIZE: f32 = 14.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Lang {
@@ -238,10 +238,20 @@ fn json_node(ui: &mut egui::Ui, key: Option<&str>, value: &Value, id: egui::Id, 
 
 /// Teks read-only yang bisa diseleksi, dengan highlight.
 pub fn code_view(ui: &mut egui::Ui, text: &str, lang: Lang, cache: &mut Highlighter) {
+    code_view_wrapped(ui, text, lang, cache, true);
+}
+
+pub fn code_view_wrapped(
+    ui: &mut egui::Ui,
+    text: &str,
+    lang: Lang,
+    cache: &mut Highlighter,
+    wrap: bool,
+) {
     let dark = ui.visuals().dark_mode;
-    let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
+    let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, width: f32| {
         let mut job = cache.job(buf.as_str(), lang, dark);
-        job.wrap.max_width = wrap;
+        job.wrap.max_width = if wrap { width } else { f32::INFINITY };
         ui.fonts_mut(|f| f.layout_job(job))
     };
     let mut view = text;
@@ -316,7 +326,7 @@ pub fn error_box(ui: &mut egui::Ui, text: &str) {
         .corner_radius(4.0)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(text).color(ui.visuals().error_fg_color));
+            ui.add(egui::Label::new(RichText::new(text).color(ui.visuals().error_fg_color)).wrap());
         });
 }
 
@@ -327,7 +337,7 @@ pub fn warn_box(ui: &mut egui::Ui, text: &str) {
         .corner_radius(4.0)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(text).color(ui.visuals().warn_fg_color));
+            ui.add(egui::Label::new(RichText::new(text).color(ui.visuals().warn_fg_color)).wrap());
         });
 }
 

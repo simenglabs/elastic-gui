@@ -100,6 +100,7 @@ pub struct Console {
     pending: Option<Pending<Vec<Executed>>>,
     started: Option<Instant>,
     tree_view: bool,
+    wrap_response: bool,
     highlighter: Highlighter,
     response_highlighter: Highlighter,
     popup: Option<Popup>,
@@ -142,6 +143,7 @@ impl Default for Console {
             pending: None,
             started: None,
             tree_view: false,
+            wrap_response: false,
             highlighter: Highlighter::default(),
             response_highlighter: Highlighter::default(),
             popup: None,
@@ -213,27 +215,41 @@ impl Console {
         self.toolbar(ui, cx);
         if self.vars_open {
             egui::Panel::right("console_vars")
+                .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                    left: 12,
+                    ..Default::default()
+                }))
                 .resizable(true)
                 .default_size(280.0)
                 .show(ui, |ui| self.vars_ui(ui, cx));
         }
         if self.history_open {
             egui::Panel::right("console_history")
+                .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                    left: 12,
+                    ..Default::default()
+                }))
                 .resizable(true)
                 .default_size(320.0)
                 .show(ui, |ui| self.history_ui(ui));
         }
         let width = ui.available_width();
         egui::Panel::left("console_editor")
+            .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                right: 12,
+                ..Default::default()
+            }))
             .resizable(true)
             .default_size(width * 0.5)
             .show(ui, |ui| self.editor_ui(ui, cx));
-        egui::CentralPanel::default().show(ui, |ui| self.response_ui(ui, cx));
+        egui::CentralPanel::default()
+            .frame(crate::theme::card(ui))
+            .show(ui, |ui| self.response_ui(ui, cx));
         self.confirm_ui(ui.ctx(), cx);
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, cx: &mut Ctx) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let mut close = None;
             for i in 0..self.tabs.len() {
                 if self.renaming == Some(i) {
@@ -280,7 +296,7 @@ impl Console {
             let running = self.pending.is_some();
             if running {
                 ui.spinner();
-                if ui.button(t("■ Batal")).clicked() {
+                if ui.button(t("Batal")).clicked() {
                     self.pending = None;
                     self.started = None;
                     self.notice = Some(t("Dibatalkan. Membatalkan task di server…").into());
@@ -291,7 +307,7 @@ impl Console {
                     }
                 }
             } else if ui
-                .button(t("▶ Jalankan"))
+                .add(crate::theme::primary(t("Jalankan")))
                 .on_hover_text("Ctrl/Cmd+Enter")
                 .clicked()
             {
@@ -416,7 +432,7 @@ impl Console {
 
     fn editor_ui(&mut self, ui: &mut egui::Ui, cx: &mut Ctx) {
         if let Some(lint) = &self.lint {
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {lint}"));
+            ui.colored_label(ui.visuals().warn_fg_color, format!("! {lint}"));
         }
         let id = self.editor_id();
         let focused = ui.memory(|m| m.has_focus(id));
@@ -481,16 +497,19 @@ impl Console {
             job.wrap.max_width = wrap;
             ui.fonts_mut(|f| f.layout_job(job))
         };
+        let editor_height = (ui.available_height() - 12.0).max(120.0);
         let output = egui::ScrollArea::both()
             .id_salt(("console_scroll", *active))
             .auto_shrink(false)
             .show(ui, |ui| {
+                ui.set_min_height(editor_height);
                 egui::TextEdit::multiline(text)
                     .id(id)
                     .code_editor()
                     .lock_focus(true)
                     .desired_width(f32::INFINITY)
-                    .desired_rows(40)
+                    .min_size(egui::vec2(0.0, editor_height))
+                    .desired_rows(1)
                     .margin(egui::Margin {
                         left: GUTTER as i8,
                         right: 4,
@@ -545,13 +564,16 @@ impl Console {
             } else {
                 ui.visuals().weak_text_color()
             };
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "▶",
-                egui::FontId::proportional(11.0),
+            let c = rect.center();
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    c + egui::vec2(-3.0, -4.0),
+                    c + egui::vec2(4.0, 0.0),
+                    c + egui::vec2(-3.0, 4.0),
+                ],
                 color,
-            );
+                egui::Stroke::NONE,
+            ));
             if response.on_hover_text(t("Jalankan request ini")).clicked() {
                 run_block = Some(block.clone());
             }
@@ -644,13 +666,25 @@ impl Console {
             } else {
                 ui.visuals().weak_text_color()
             };
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                if folded { "▸" } else { "▾" },
-                egui::FontId::proportional(11.0),
+            let c = rect.center();
+            let points = if folded {
+                vec![
+                    c + egui::vec2(-2.0, -4.0),
+                    c + egui::vec2(3.0, 0.0),
+                    c + egui::vec2(-2.0, 4.0),
+                ]
+            } else {
+                vec![
+                    c + egui::vec2(-4.0, -2.0),
+                    c + egui::vec2(4.0, -2.0),
+                    c + egui::vec2(0.0, 3.0),
+                ]
+            };
+            painter.add(egui::Shape::convex_polygon(
+                points,
                 color,
-            );
+                egui::Stroke::NONE,
+            ));
             if folded {
                 let at = rows.pos(chars.at(opener_end));
                 painter.text(
@@ -1153,14 +1187,23 @@ impl Console {
         }
         if self.results.is_empty() {
             if self.started.is_none() {
-                ui.weak(t("Hasil request akan tampil di sini."));
+                crate::theme::empty_state(
+                    ui,
+                    t("Respons request"),
+                    t("Hasil request akan tampil di sini."),
+                );
             }
             return;
         }
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tree_view, false, t("Teks"));
             ui.selectable_value(&mut self.tree_view, true, "Tree");
+            if !self.tree_view {
+                ui.separator();
+                ui.toggle_value(&mut self.wrap_response, t("Bungkus baris"));
+            }
         });
+        let wrap = self.wrap_response;
         let multiple = self.results.len() > 1;
         let tree_view = self.tree_view;
         let Self {
@@ -1211,10 +1254,10 @@ impl Console {
                             if tree_view && let Some(tree) = &r.tree {
                                 widgets::json_tree(ui, tree, egui::Id::unique(("resp_tree", i)));
                             } else if !multiple {
-                                widgets::code_view(ui, &r.pretty, Lang::Json, response_highlighter);
+                                widgets::code_view_wrapped(ui, &r.pretty, Lang::Json, response_highlighter, wrap);
                             } else {
                                 // Banyak response: tanpa cache highlight bersama.
-                                widgets::code_view(ui, &r.pretty, Lang::Json, &mut Highlighter::default());
+                                widgets::code_view_wrapped(ui, &r.pretty, Lang::Json, &mut Highlighter::default(), wrap);
                             }
                             if resp.body.len() > VIEW_LIMIT {
                                 ui.weak(tf(
@@ -1512,6 +1555,8 @@ pub fn byte_to_char(text: &str, byte: usize) -> usize {
 
 /// X-05: terjemahan English untuk teks di file ini.
 pub const EN: &[(&str, &str)] = &[
+    ("Respons request", "Request response"),
+    ("Bungkus baris", "Wrap lines"),
     (
         "# Ctrl/Cmd+Enter: jalankan request di cursor. Ctrl+Space: saran.\n\
 # Ctrl/Cmd+I: rapikan JSON. Seleksi beberapa request untuk menjalankan semuanya.\n\

@@ -21,8 +21,8 @@ use crate::widgets::{self, Confirm, filters, time::TimeRange};
 const FILE: &str = "dashboards.json";
 const COLUMNS: f32 = 3.0;
 const PALETTE: [Color32; 8] = [
-    Color32::from_rgb(0x54, 0xb3, 0x99),
-    Color32::from_rgb(0x61, 0x92, 0xd2),
+    Color32::from_rgb(40, 120, 216),
+    Color32::from_rgb(62, 169, 147),
     Color32::from_rgb(0xd6, 0xbf, 0x57),
     Color32::from_rgb(0xd3, 0x60, 0x86),
     Color32::from_rgb(0x9a, 0x7d, 0xd8),
@@ -328,6 +328,10 @@ impl Dashboard {
         }
 
         egui::Panel::left("dash_list")
+            .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                right: 12,
+                ..Default::default()
+            }))
             .resizable(true)
             .default_size(220.0)
             .show(ui, |ui| self.list_ui(ui));
@@ -375,6 +379,10 @@ impl Dashboard {
             .filter(|p| *p < self.dashes[index].panels.len())
         {
             egui::Panel::right("panel_editor")
+                .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                    left: 12,
+                    ..Default::default()
+                }))
                 .resizable(true)
                 .default_size(320.0)
                 .show(ui, |ui| self.editor_ui(ui, index, p, &fields, cx));
@@ -454,7 +462,7 @@ impl Dashboard {
         let mut changed = false;
         let mut duplicate = None;
         let dash = &mut self.dashes[index];
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if self.renaming {
                 let r = ui.add(egui::TextEdit::singleline(&mut dash.name).desired_width(200.0));
                 if r.lost_focus() {
@@ -500,13 +508,17 @@ impl Dashboard {
             if widgets::time::time_picker(ui, &mut dash.range, &mut self.refresh_secs) {
                 changed = true;
             }
-            ui.toggle_value(&mut self.edit, "✎ Edit");
+            ui.toggle_value(&mut self.edit, "Edit");
             if self.pending.is_some() {
                 ui.spinner();
-            } else if ui.button("⟳").on_hover_text(t("Muat ulang")).clicked() {
+            } else if ui
+                .button(t("Muat ulang"))
+                .on_hover_text(t("Muat ulang"))
+                .clicked()
+            {
                 changed = true;
             }
-            ui.menu_button("⋯", |ui| {
+            ui.menu_button("...", |ui| {
                 if ui.button(t("Duplikat")).clicked() {
                     let mut copy = dash.clone();
                     copy.id = Dash::default().id;
@@ -538,7 +550,7 @@ impl Dashboard {
             self.dirty = true;
         }
         let dash = &mut self.dashes[index];
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let r = ui.add(
                 egui::TextEdit::singleline(&mut dash.query)
                     .desired_width((ui.available_width() - 80.0).max(200.0))
@@ -575,12 +587,12 @@ impl Dashboard {
         }
         if dash.panels.is_empty() {
             ui.weak(t(
-                "Belum ada panel. Aktifkan ✎ Edit lalu klik + Tambah panel.",
+                "Belum ada panel. Aktifkan Edit lalu klik + Tambah panel.",
             ));
             return;
         }
         let total = ui.available_width();
-        let gap = 8.0;
+        let gap = 16.0;
         let unit = (total - gap * (COLUMNS - 1.0)) / COLUMNS;
         // Susun panel per baris berdasarkan lebar kolom.
         let mut rows: Vec<Vec<usize>> = vec![Vec::new()];
@@ -607,8 +619,8 @@ impl Dashboard {
                     let panel = &dash.panels[i];
                     let w = panel.width.clamp(1, 3) as f32;
                     let width = unit * w + gap * (w - 1.0);
-                    let frame = egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.set_width(width - 14.0);
+                    let frame = crate::theme::card(ui).show(ui, |ui| {
+                        ui.set_width((width - 34.0).max(60.0));
                         ui.set_height(panel.height);
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
@@ -617,7 +629,7 @@ impl Dashboard {
                                         egui::Id::unique(("panel_drag", index, i)),
                                         i,
                                         |ui| {
-                                            ui.strong(format!("⠿ {}", panel.title));
+                                            ui.strong(format!(":: {}", panel.title));
                                         },
                                     )
                                     .response
@@ -635,8 +647,8 @@ impl Dashboard {
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             for (icon, name, tip) in [
-                                                ("🗑", "delete", t("Hapus")),
-                                                ("✎", "edit", t("Edit panel")),
+                                                (t("Hapus"), "delete", t("Hapus")),
+                                                ("Edit", "edit", t("Edit panel")),
                                             ] {
                                                 if ui
                                                     .small_button(icon)
@@ -653,7 +665,7 @@ impl Dashboard {
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             if ui
-                                                .small_button("⌕")
+                                                .small_button("Inspect")
                                                 .on_hover_text(t(
                                                     "Inspect: buka request di Dev Tools",
                                                 ))
@@ -856,7 +868,7 @@ impl Dashboard {
         ui.horizontal(|ui| {
             ui.heading(t("Edit panel"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("✕").clicked() {
+                if ui.small_button("×").clicked() {
                     self.editing = None;
                 }
             });
@@ -925,7 +937,7 @@ impl Dashboard {
                         ui.end_row();
                         if self.saved_names.is_empty() {
                             ui.label("");
-                            ui.weak(t("Belum ada. Simpan pencarian dari Discover (⭐)."));
+                            ui.weak(t("Belum ada. Simpan pencarian dari Discover."));
                             ui.end_row();
                         }
                     } else {
@@ -1496,6 +1508,8 @@ fn render(ui: &mut egui::Ui, i: usize, panel: &Panel, data: &Data) -> Option<Eve
         Data::Series(series) => {
             let format = panel.format;
             let response = Plot::new(("series", i))
+                .show_grid([false, true])
+                .grid_spacing(60.0..=120.0)
                 .height(height)
                 .legend(Legend::default())
                 .allow_scroll(false)
@@ -1935,8 +1949,8 @@ pub const EN: &[(&str, &str)] = &[
         "Enter an index pattern above to start.",
     ),
     (
-        "Belum ada panel. Aktifkan ✎ Edit lalu klik + Tambah panel.",
-        "No panels yet. Enable ✎ Edit, then click + Add panel.",
+        "Belum ada panel. Aktifkan Edit lalu klik + Tambah panel.",
+        "No panels yet. Enable Edit, then click + Add panel.",
     ),
     (
         "Drag ke panel lain untuk memindahkan",
@@ -1972,8 +1986,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Jumlah opsi", "Number of options"),
     ("Pencarian", "Search"),
     (
-        "Belum ada. Simpan pencarian dari Discover (⭐).",
-        "None yet. Save a search from Discover (⭐).",
+        "Belum ada. Simpan pencarian dari Discover.",
+        "None yet. Save a search from Discover.",
     ),
     ("Pisah per (opsional)", "Split by (optional)"),
     ("Kelompok per", "Group by"),

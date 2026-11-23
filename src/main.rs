@@ -5,6 +5,7 @@ mod es;
 mod i18n;
 mod profile;
 mod task;
+mod theme;
 mod ui;
 mod widgets;
 

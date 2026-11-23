@@ -6,3 +6,5 @@
 .env
 # Workspace subagent-driven development
 .superpowers/
+
+docs/

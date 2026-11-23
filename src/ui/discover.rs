@@ -62,6 +62,7 @@ pub struct Discover {
     pattern: String,
     pattern_input: String,
     pattern_open: bool,
+    focus_source: bool,
     time_field: Option<String>,
     time_field_chosen: bool,
     range: TimeRange,
@@ -379,21 +380,31 @@ impl Discover {
 
         self.query_bar(ui, cx, &fields);
         egui::Panel::left("discover_fields")
+            .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                right: 12,
+                ..Default::default()
+            }))
             .resizable(true)
             .default_size(260.0)
             .show(ui, |ui| self.sidebar(ui, cx, &fields));
         if self.selected.is_some() {
             egui::Panel::bottom("discover_doc")
+                .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                    top: 12,
+                    ..Default::default()
+                }))
                 .resizable(true)
                 .default_size(320.0)
                 .show(ui, |ui| self.detail(ui));
         }
-        egui::CentralPanel::default().show(ui, |ui| self.results(ui, cx, &fields));
+        egui::CentralPanel::default()
+            .frame(crate::theme::card(ui))
+            .show(ui, |ui| self.results(ui, cx, &fields));
         self.remember_view(cx);
     }
 
     fn query_bar(&mut self, ui: &mut egui::Ui, cx: &mut Ctx, fields: &[Field]) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             egui::ComboBox::from_id_salt("query_mode")
                 .width(80.0)
                 .selected_text(if self.esql {
@@ -466,7 +477,7 @@ impl Discover {
             }
             let busy = self.pending.is_some();
             if ui
-                .add_enabled(!busy, egui::Button::new(t("Cari")))
+                .add_enabled(!busy, crate::theme::primary(t("Cari")))
                 .clicked()
                 || submitted
             {
@@ -481,7 +492,7 @@ impl Discover {
                 }
             }
             if !self.history.is_empty() {
-                ui.menu_button("🕘", |ui| {
+                ui.menu_button("History", |ui| {
                     ui.set_max_width(500.0);
                     for h in self.history.clone() {
                         if ui
@@ -707,6 +718,10 @@ impl Discover {
                 .hint_text("logs-*, alias, data stream")
                 .desired_width(f32::INFINITY),
         );
+        if self.focus_source {
+            response.request_focus();
+            self.focus_source = false;
+        }
         if response.gained_focus() {
             self.pattern_open = true;
         }
@@ -838,7 +853,7 @@ impl Discover {
 
     fn saved_ui(&mut self, ui: &mut egui::Ui, cx: &mut Ctx) {
         ui.menu_button(
-            tf("⭐ Pencarian tersimpan ({0})", &[&self.saved.len()]),
+            tf("Pencarian tersimpan ({0})", &[&self.saved.len()]),
             |ui| {
                 ui.set_min_width(280.0);
                 let mut remove = None;
@@ -853,7 +868,7 @@ impl Discover {
                             load = Some(s.clone());
                             ui.close();
                         }
-                        if ui.small_button("🗑").clicked() {
+                        if ui.small_button(t("Hapus")).clicked() {
                             remove = Some(i);
                         }
                     });
@@ -1090,7 +1105,7 @@ impl Discover {
             ui.label(RichText::new(icon).monospace().weak())
                 .on_hover_text(f.types.join(" | "));
             if f.types.len() > 1 {
-                ui.label(RichText::new("⚠").color(ui.visuals().warn_fg_color))
+                ui.label(RichText::new("!").color(ui.visuals().warn_fg_color))
                     .on_hover_text(tf("Konflik tipe antar index: {0}", &[&f.types.join(", ")]));
             }
             let open = self.field_open.as_deref() == Some(f.name.as_str());
@@ -1253,7 +1268,20 @@ impl Discover {
             widgets::warn_box(ui, warn);
         }
         if self.pattern.is_empty() {
-            ui.weak(t("Pilih sumber data di panel kiri untuk mulai."));
+            crate::theme::empty_state(
+                ui,
+                t("Jelajahi data cluster"),
+                t("Pilih sumber data di panel kiri untuk mulai."),
+            );
+            ui.vertical_centered(|ui| {
+                if ui
+                    .add(crate::theme::primary(t("Pilih sumber data")))
+                    .clicked()
+                {
+                    self.pattern_open = true;
+                    self.focus_source = true;
+                }
+            });
             return;
         }
         if self.esql {
@@ -1324,22 +1352,33 @@ impl Discover {
 
     fn histogram(&mut self, ui: &mut egui::Ui) {
         let width = self.interval.0 as f64;
+        let color = ui.visuals().hyperlink_color;
         let bars: Vec<Bar> = self
             .buckets
             .iter()
-            .map(|(x, y)| Bar::new(*x + width / 2.0, *y).width(width * 0.9))
+            .map(|(x, y)| {
+                Bar::new(*x + width / 2.0, *y)
+                    .width(width * 0.9)
+                    .fill(color)
+                    .stroke(egui::Stroke::NONE)
+            })
             .collect();
-        let chart = BarChart::new("hits", bars).color(ui.visuals().selection.bg_fill);
+        let chart = BarChart::new("hits", bars).color(color);
         // Seri breakdown ditumpuk; sisa (di luar top 5) tampil abu-abu.
         let mut stacked: Vec<BarChart> = Vec::new();
         if self.breakdown.is_some() && !self.series.is_empty() {
             for (i, (key, points)) in self.series.iter().enumerate() {
+                let color = BREAKDOWN_COLORS[i % BREAKDOWN_COLORS.len()];
                 let bars = points
                     .iter()
-                    .map(|(x, y)| Bar::new(*x + width / 2.0, *y).width(width * 0.9))
+                    .map(|(x, y)| {
+                        Bar::new(*x + width / 2.0, *y)
+                            .width(width * 0.9)
+                            .fill(color)
+                            .stroke(egui::Stroke::NONE)
+                    })
                     .collect();
                 let refs: Vec<&BarChart> = stacked.iter().collect();
-                let color = BREAKDOWN_COLORS[i % BREAKDOWN_COLORS.len()];
                 stacked.push(
                     BarChart::new(key.clone(), bars)
                         .color(color)
@@ -1355,7 +1394,10 @@ impl Discover {
                         .iter()
                         .flat_map(|(_, pts)| pts.iter().filter(|(px, _)| px == x).map(|(_, y)| *y))
                         .sum();
-                    Bar::new(*x + width / 2.0, (total - shown).max(0.0)).width(width * 0.9)
+                    Bar::new(*x + width / 2.0, (total - shown).max(0.0))
+                        .width(width * 0.9)
+                        .fill(egui::Color32::GRAY)
+                        .stroke(egui::Stroke::NONE)
                 })
                 .collect();
             let refs: Vec<&BarChart> = stacked.iter().collect();
@@ -1366,6 +1408,8 @@ impl Discover {
             );
         }
         let response = Plot::new("discover_histogram")
+            .show_grid([false, true])
+            .grid_spacing(60.0..=120.0)
             .height(110.0)
             .allow_drag(false)
             .allow_zoom(false)
@@ -1473,7 +1517,7 @@ impl Discover {
             format!("{name}{arrow}")
         };
         builder
-            .header(22.0, |mut header| {
+            .header(38.0, |mut header| {
                 if let Some(tf) = &time_field {
                     header.col(|ui| {
                         let label = if self.sort.is_none() {
@@ -1490,14 +1534,14 @@ impl Discover {
                     header.col(|ui| {
                         // DIS-31: geser kolom ke kiri/kanan.
                         if ui
-                            .add_enabled(idx > 0, egui::Button::new("◀").small())
+                            .add_enabled(idx > 0, egui::Button::new("<").small())
                             .on_hover_text(t("Geser kolom ke kiri"))
                             .clicked()
                         {
                             move_click = Some((idx, -1));
                         }
                         if ui
-                            .add_enabled(idx + 1 < columns.len(), egui::Button::new("▶").small())
+                            .add_enabled(idx + 1 < columns.len(), egui::Button::new(">").small())
                             .on_hover_text(t("Geser kolom ke kanan"))
                             .clicked()
                         {
@@ -1525,7 +1569,7 @@ impl Discover {
                 });
             })
             .body(|body| {
-                body.rows(20.0, self.hits.len(), |mut row| {
+                body.rows(crate::theme::ROW_HEIGHT, self.hits.len(), |mut row| {
                     let i = row.index();
                     row.set_selected(selected == Some(i));
                     let hit = &self.hits[i];
@@ -1641,7 +1685,7 @@ impl Discover {
                 ui.spinner();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("✕").clicked() {
+                if ui.small_button("×").clicked() {
                     self.selected = None;
                     self.doc_edit = None;
                 }
@@ -2027,7 +2071,7 @@ impl Discover {
         }
         builder = builder.column(Column::remainder());
         builder
-            .header(22.0, |mut h| {
+            .header(38.0, |mut h| {
                 for (name, kind) in &table.columns {
                     h.col(|ui| {
                         ui.strong(name).on_hover_text(kind);
@@ -2036,7 +2080,7 @@ impl Discover {
                 h.col(|_| {});
             })
             .body(|body| {
-                body.rows(20.0, table.rows.len(), |mut row| {
+                body.rows(crate::theme::ROW_HEIGHT, table.rows.len(), |mut row| {
                     let values = &table.rows[row.index()];
                     for i in 0..table.columns.len() {
                         row.col(|ui| {
@@ -2470,6 +2514,8 @@ fn move_column(columns: &mut [String], index: usize, delta: isize) -> bool {
 
 /// X-05: terjemahan English untuk teks di file ini.
 pub const EN: &[(&str, &str)] = &[
+    ("Jelajahi data cluster", "Explore cluster data"),
+    ("Pilih sumber data", "Select data source"),
     ("Dokumen disimpan.", "Document saved."),
     ("Dokumen dihapus.", "Document deleted."),
     ("Cari", "Search"),
@@ -2492,7 +2538,7 @@ pub const EN: &[(&str, &str)] = &[
     ("tanpa waktu", "no time"),
     ("Kolom terpilih", "Selected columns"),
     ("Field ({0})", "Fields ({0})"),
-    ("⭐ Pencarian tersimpan ({0})", "⭐ Saved searches ({0})"),
+    ("Pencarian tersimpan ({0})", "Saved searches ({0})"),
     ("Belum ada pencarian tersimpan.", "No saved searches yet."),
     ("{0} baris diekspor ke {1}", "{0} rows exported to {1}"),
     ("Ekspor {0} baris…", "Exporting {0} rows…"),

@@ -11,6 +11,7 @@ use crate::es::catalog::Catalog;
 use crate::i18n::{self, Lang, t, tf};
 use crate::profile::{AppSettings, Profile, Store, secret};
 use crate::task::{Pending, poll};
+use crate::theme;
 use crate::ui::{
     self, Ctx, Nav, console::Console, dashboard::Dashboard, discover::Discover, indices::Indices,
     profiles::Profiles,
@@ -136,10 +137,10 @@ impl Workspace {
 
     fn health_color(&self) -> Color32 {
         match &self.health {
-            Some(Ok(s)) if s == "green" => Color32::from_rgb(0x2e, 0xa0, 0x43),
-            Some(Ok(s)) if s == "yellow" => Color32::from_rgb(0xd4, 0xa7, 0x2c),
-            Some(Ok(s)) if s == "red" => Color32::from_rgb(0xd0, 0x3b, 0x3b),
-            Some(Err(_)) => Color32::from_rgb(0xd0, 0x3b, 0x3b),
+            Some(Ok(s)) if s == "green" => theme::GREEN,
+            Some(Ok(s)) if s == "yellow" => theme::AMBER,
+            Some(Ok(s)) if s == "red" => theme::RED,
+            Some(Err(_)) => theme::RED,
             _ => Color32::GRAY,
         }
     }
@@ -216,6 +217,7 @@ pub struct DesktopApp {
     module: Module,
     workspaces: HashMap<String, Workspace>,
     profile_ui: Profiles,
+    sidebar_collapsed: bool,
     /// PRF-15: tab terbuka (profile, modul) untuk berpindah cepat antar cluster.
     tabs: Vec<(String, Module)>,
     /// X-04: command palette (teks cari, pilihan).
@@ -233,7 +235,7 @@ enum Command {
 
 impl DesktopApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        theme::apply(&cc.egui_ctx, false);
         let store = Store::open();
         let settings = store.load_settings();
         i18n::set_lang(settings.lang);
@@ -260,6 +262,7 @@ impl DesktopApp {
             tabs: Vec::new(),
             palette: None,
             profile_ui: Profiles::default(),
+            sidebar_collapsed: false,
         }
     }
 
@@ -285,7 +288,7 @@ impl DesktopApp {
             let active = self.active.as_deref() == Some(id.as_str()) && self.module == *module;
             let mut text = RichText::new(format!("{} · {}", p.name, module.label()));
             if p.is_prod() {
-                text = text.color(Color32::from_rgb(0xff, 0x8a, 0x80));
+                text = text.color(ui.visuals().error_fg_color);
             }
             if ui.selectable_label(active, text).clicked() {
                 pick = Some(i);
@@ -324,39 +327,45 @@ impl DesktopApp {
             return;
         };
         let ws = self.workspaces.get(&profile.id);
-        egui::Panel::bottom("status_bar").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let dot = ws.map_or(Color32::GRAY, Workspace::health_color);
-                ui.label(RichText::new("●").color(dot));
-                ui.small(format!("{} ({})", profile.name, profile.env.label()));
-                if let Some(Ok(info)) = ws.and_then(|w| w.info.as_ref()) {
-                    let flavor = if info.caps.serverless {
-                        " · serverless"
-                    } else {
-                        ""
-                    };
-                    ui.small(format!("· {} · v{}{flavor}", info.name, info.version));
-                }
-                if let Some(Ok(health)) = ws.and_then(|w| w.health.as_ref()) {
-                    ui.small(format!("· health {health}"));
-                }
-                if profile.read_only {
-                    ui.small(RichText::new("· read-only").color(ui.visuals().warn_fg_color));
-                }
-                let running = ws
-                    .and_then(|w| w.conn.as_ref()?.as_ref().ok())
-                    .map_or(0, |c| c.inflight());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if running > 0 {
-                        ui.small(tf("{0} request berjalan", &[&running]));
-                        ui.spinner();
-                        ui.ctx().request_repaint_after(Duration::from_millis(250));
-                    } else {
-                        ui.small(profile.urls.first().map(String::as_str).unwrap_or_default());
+        egui::Panel::bottom("status_bar")
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::palette(ui.visuals().dark_mode).surface)
+                    .inner_margin(egui::Margin::symmetric(20, 5)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let dot = ws.map_or(Color32::GRAY, Workspace::health_color);
+                    theme::dot(ui, dot);
+                    ui.small(format!("{} ({})", profile.name, profile.env.label()));
+                    if let Some(Ok(info)) = ws.and_then(|w| w.info.as_ref()) {
+                        let flavor = if info.caps.serverless {
+                            " · serverless"
+                        } else {
+                            ""
+                        };
+                        ui.small(format!("· {} · v{}{flavor}", info.name, info.version));
                     }
+                    if let Some(Ok(health)) = ws.and_then(|w| w.health.as_ref()) {
+                        ui.small(format!("· health {health}"));
+                    }
+                    if profile.read_only {
+                        ui.small(RichText::new("· read-only").color(ui.visuals().warn_fg_color));
+                    }
+                    let running = ws
+                        .and_then(|w| w.conn.as_ref()?.as_ref().ok())
+                        .map_or(0, |c| c.inflight());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if running > 0 {
+                            ui.small(tf("{0} request berjalan", &[&running]));
+                            ui.spinner();
+                            ui.ctx().request_repaint_after(Duration::from_millis(250));
+                        } else {
+                            ui.small(profile.urls.first().map(String::as_str).unwrap_or_default());
+                        }
+                    });
                 });
             });
-        });
     }
 
     /// X-04: Ctrl/Cmd+K untuk pindah modul, cluster, atau membuka index di Discover.
@@ -449,11 +458,7 @@ impl DesktopApp {
                 Command::Profile(id) => self.active = Some(id),
                 Command::Theme => {
                     let dark = ctx.global_style().visuals.dark_mode;
-                    ctx.set_visuals(if dark {
-                        egui::Visuals::light()
-                    } else {
-                        egui::Visuals::dark()
-                    });
+                    theme::apply(ctx, !dark);
                 }
                 Command::Discover(pattern) => {
                     if let Some(ws) = self
@@ -479,135 +484,210 @@ impl DesktopApp {
             .and_then(|id| self.profiles.iter().find(|p| &p.id == id))
             .cloned();
         let prod = active_profile.as_ref().is_some_and(Profile::is_prod);
-        let mut frame = egui::Frame::side_top_panel(ui.style());
-        if prod {
-            frame = frame.fill(Color32::from_rgb(0x5a, 0x1d, 0x1d));
-        }
-        egui::Panel::top("top_bar").frame(frame).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Elastic GUI");
-                ui.separator();
-                let current = active_profile
-                    .as_ref()
-                    .map_or(t("Pilih cluster").to_owned(), |p| p.name.clone());
-                let mut switch_to = None;
-                egui::ComboBox::from_id_salt("cluster_switcher")
-                    .selected_text(current)
-                    .width(200.0)
-                    .show_ui(ui, |ui| {
-                        for p in &self.profiles {
-                            let dot = self
-                                .workspaces
-                                .get(&p.id)
-                                .map_or(Color32::GRAY, Workspace::health_color);
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("●").color(dot));
-                                if ui
-                                    .selectable_label(
-                                        self.active.as_deref() == Some(p.id.as_str()),
-                                        format!("{}  ·  {}", p.name, p.env.label()),
-                                    )
-                                    .clicked()
-                                {
-                                    switch_to = Some(p.id.clone());
-                                }
-                            });
-                        }
-                    });
-                if let Some(id) = switch_to {
-                    self.active = Some(id);
-                }
-                if let Some(profile) = &active_profile {
-                    let ws = self.workspaces.get(&profile.id);
-                    let dot = ws.map_or(Color32::GRAY, Workspace::health_color);
-                    let health = ws
-                        .and_then(|w| w.health.as_ref())
-                        .map_or("…".to_owned(), |h| match h {
-                            Ok(s) => s.clone(),
-                            Err(e) => e.clone(),
+        let frame = egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14));
+        egui::Panel::top("top_bar")
+            .exact_size(66.0)
+            .frame(frame)
+            .show(ui, |ui| {
+                let rect = ui.max_rect().expand2(egui::vec2(20.0, 14.0));
+                theme::header_gradient(ui, rect);
+                let wide = ui.available_width() > 1150.0;
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Elastic GUI").size(21.0).strong());
+                    ui.separator();
+                    let current = active_profile
+                        .as_ref()
+                        .map_or(t("Pilih cluster").to_owned(), |p| p.name.clone());
+                    let mut switch_to = None;
+                    egui::ComboBox::from_id_salt("cluster_switcher")
+                        .selected_text(current)
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            for p in &self.profiles {
+                                let dot = self
+                                    .workspaces
+                                    .get(&p.id)
+                                    .map_or(Color32::GRAY, Workspace::health_color);
+                                ui.horizontal(|ui| {
+                                    theme::dot(ui, dot);
+                                    if ui
+                                        .selectable_label(
+                                            self.active.as_deref() == Some(p.id.as_str()),
+                                            format!("{}  ·  {}", p.name, p.env.label()),
+                                        )
+                                        .clicked()
+                                    {
+                                        switch_to = Some(p.id.clone());
+                                    }
+                                });
+                            }
                         });
-                    ui.label(RichText::new("●").color(dot))
-                        .on_hover_text(format!("Health: {health}"));
-                    let env = RichText::new(profile.env.label().to_uppercase()).strong();
-                    ui.label(if prod {
-                        env.color(Color32::from_rgb(0xff, 0x8a, 0x80))
-                    } else {
-                        env
-                    });
-                    let conn_err = ws.and_then(|w| w.conn.as_ref()?.as_ref().err());
-                    match ws.and_then(|w| w.info.as_ref()) {
-                        Some(Ok(info)) => {
-                            let user = info
-                                .user
-                                .as_deref()
-                                .map(|u| format!(" · {u}"))
-                                .unwrap_or_default();
-                            ui.weak(format!("{} · v{}{user}", info.name, info.version));
-                        }
-                        Some(Err(err)) => {
-                            ui.colored_label(ui.visuals().error_fg_color, t("Tidak terhubung"))
-                                .on_hover_text(err);
-                        }
-                        None => match conn_err {
-                            Some(err) => {
-                                ui.colored_label(ui.visuals().error_fg_color, t("Tidak terhubung"))
-                                    .on_hover_text(err);
-                            }
-                            None => {
-                                ui.spinner();
-                            }
-                        },
+                    if let Some(id) = switch_to {
+                        self.active = Some(id);
                     }
-                    if profile.read_only {
+                    if let Some(profile) = &active_profile {
+                        let ws = self.workspaces.get(&profile.id);
+                        let dot = ws.map_or(Color32::GRAY, Workspace::health_color);
+                        let health =
+                            ws.and_then(|w| w.health.as_ref())
+                                .map_or("…".to_owned(), |h| match h {
+                                    Ok(s) => s.clone(),
+                                    Err(e) => e.clone(),
+                                });
+                        theme::dot(ui, dot).on_hover_text(format!("Health: {health}"));
+                        theme::badge(
+                            ui,
+                            &profile.env.label().to_uppercase(),
+                            if prod {
+                                ui.visuals().error_fg_color
+                            } else {
+                                ui.visuals().hyperlink_color
+                            },
+                        );
+                        let conn_err = ws.and_then(|w| w.conn.as_ref()?.as_ref().err());
+                        match ws.and_then(|w| w.info.as_ref()) {
+                            Some(Ok(info)) => {
+                                let user = info
+                                    .user
+                                    .as_deref()
+                                    .map(|u| format!(" · {u}"))
+                                    .unwrap_or_default();
+                                if wide {
+                                    ui.label(format!("{} · v{}{user}", info.name, info.version));
+                                }
+                            }
+                            Some(Err(err)) => {
+                                if wide {
+                                    ui.colored_label(
+                                        ui.visuals().error_fg_color,
+                                        t("Tidak terhubung"),
+                                    )
+                                    .on_hover_text(err);
+                                }
+                            }
+                            None => match conn_err {
+                                Some(err) => {
+                                    if wide {
+                                        ui.colored_label(
+                                            ui.visuals().error_fg_color,
+                                            t("Tidak terhubung"),
+                                        )
+                                        .on_hover_text(err);
+                                    }
+                                }
+                                None => {
+                                    ui.spinner();
+                                }
+                            },
+                        }
+                        if profile.read_only {
+                            ui.label(
+                                RichText::new(if wide { "READ-ONLY" } else { "RO" })
+                                    .color(ui.visuals().warn_fg_color)
+                                    .strong(),
+                            )
+                            .on_hover_text("READ-ONLY");
+                        }
+                        if profile.insecure {
+                            ui.label(
+                                RichText::new(if wide {
+                                    t("TLS TIDAK DIVERIFIKASI")
+                                } else {
+                                    "TLS!"
+                                })
+                                .color(ui.visuals().warn_fg_color),
+                            )
+                            .on_hover_text(t("Verifikasi sertifikat dimatikan di profile ini."));
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let dark = ui.visuals().dark_mode;
+                        if ui
+                            .button(if dark { t("Terang") } else { t("Gelap") })
+                            .on_hover_text(t("Ganti tema"))
+                            .clicked()
+                        {
+                            theme::apply(ui.ctx(), !dark);
+                        }
+                        if ui
+                            .button(t("Perintah"))
+                            .on_hover_text("Ctrl/Cmd+K")
+                            .clicked()
+                        {
+                            self.palette = Some((String::new(), 0));
+                        }
+                        ui.separator();
+                        // X-05: urutan dibalik karena layout kanan-ke-kiri, tampil "ID | EN".
+                        for lang in Lang::ALL.into_iter().rev() {
+                            if ui
+                                .selectable_label(i18n::lang() == lang, lang.code())
+                                .on_hover_text(t("Bahasa antarmuka"))
+                                .clicked()
+                            {
+                                self.set_lang(lang);
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    });
+                });
+            });
+    }
+
+    fn navigation(&mut self, ui: &mut egui::Ui) {
+        let compact = self.sidebar_collapsed || ui.available_width() < 1100.0;
+        let p = theme::palette(ui.visuals().dark_mode);
+        egui::Panel::left("app_navigation")
+            .resizable(false)
+            .exact_size(if compact { 76.0 } else { 216.0 })
+            .frame(egui::Frame::new().fill(p.surface).inner_margin(14))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if !compact {
                         ui.label(
-                            RichText::new("READ-ONLY")
-                                .color(ui.visuals().warn_fg_color)
+                            RichText::new(t("WORKSPACE"))
+                                .size(11.0)
+                                .color(p.muted)
                                 .strong(),
                         );
                     }
-                    if profile.insecure {
-                        ui.label(
-                            RichText::new(t("TLS TIDAK DIVERIFIKASI"))
-                                .color(ui.visuals().warn_fg_color),
-                        )
-                        .on_hover_text(t("Verifikasi sertifikat dimatikan di profile ini."));
-                    }
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let dark = ui.visuals().dark_mode;
-                    if ui
-                        .small_button(if dark { "☀" } else { "🌙" })
-                        .on_hover_text(t("Ganti tema"))
-                        .clicked()
-                    {
-                        ui.ctx().set_visuals(if dark {
-                            egui::Visuals::light()
-                        } else {
-                            egui::Visuals::dark()
-                        });
-                    }
-                    ui.separator();
-                    // X-05: urutan dibalik karena layout kanan-ke-kiri, tampil "ID | EN".
-                    for lang in Lang::ALL.into_iter().rev() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .selectable_label(i18n::lang() == lang, lang.code())
-                            .on_hover_text(t("Bahasa antarmuka"))
+                            .small_button(if compact { ">" } else { "<" })
+                            .on_hover_text(t("Ciutkan / perluas navigasi"))
                             .clicked()
                         {
-                            self.set_lang(lang);
-                            ui.ctx().request_repaint();
+                            self.sidebar_collapsed = !compact;
                         }
+                    });
+                });
+                ui.add_space(12.0);
+                for (module, icon) in [
+                    (Module::Discover, theme::Icon::Search),
+                    (Module::Console, theme::Icon::Code),
+                    (Module::Dashboard, theme::Icon::Dashboard),
+                    (Module::Indices, theme::Icon::Database),
+                    (Module::Profiles, theme::Icon::Cluster),
+                ] {
+                    if theme::nav_button(ui, module.label(), icon, self.module == module, compact)
+                        .clicked()
+                    {
+                        self.module = module;
                     }
+                }
+            });
+        egui::Panel::top("workspace_heading")
+            .frame(
+                egui::Frame::new()
+                    .fill(p.background)
+                    .inner_margin(egui::Margin::symmetric(20, 12)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(self.module.label()).size(24.0).strong());
+                    ui.separator();
+                    self.tabs_ui(ui);
                 });
             });
-            ui.horizontal(|ui| {
-                for module in Module::ALL {
-                    ui.selectable_value(&mut self.module, module, module.label());
-                }
-                ui.separator();
-                self.tabs_ui(ui);
-            });
-        });
     }
 }
 
@@ -624,33 +704,36 @@ impl eframe::App for DesktopApp {
         self.palette_ui(&ctx);
         self.top_bar(ui);
         self.status_bar(ui);
+        self.navigation(ui);
 
         if self.module == Module::Profiles {
-            egui::CentralPanel::default().show(ui, |ui| {
-                if !self.profile_ui.has_selection()
-                    && let Some(id) = self.active.clone()
-                {
-                    self.profile_ui.select(&id, &self.profiles);
-                }
-                for event in self.profile_ui.ui(ui, &mut self.profiles, &self.store) {
-                    match event {
-                        ui::profiles::Event::Changed(id) => {
-                            self.workspaces.remove(&id);
-                            if !self.profiles.iter().any(|p| p.id == id) {
-                                if self.active.as_deref() == Some(id.as_str()) {
-                                    self.active = self.profiles.first().map(|p| p.id.clone());
+            egui::CentralPanel::default()
+                .frame(theme::workspace(ui))
+                .show(ui, |ui| {
+                    if !self.profile_ui.has_selection()
+                        && let Some(id) = self.active.clone()
+                    {
+                        self.profile_ui.select(&id, &self.profiles);
+                    }
+                    for event in self.profile_ui.ui(ui, &mut self.profiles, &self.store) {
+                        match event {
+                            ui::profiles::Event::Changed(id) => {
+                                self.workspaces.remove(&id);
+                                if !self.profiles.iter().any(|p| p.id == id) {
+                                    if self.active.as_deref() == Some(id.as_str()) {
+                                        self.active = self.profiles.first().map(|p| p.id.clone());
+                                    }
+                                } else if self.active.is_none() {
+                                    self.active = Some(id);
                                 }
-                            } else if self.active.is_none() {
+                            }
+                            ui::profiles::Event::Activate(id) => {
                                 self.active = Some(id);
+                                self.module = Module::Discover;
                             }
                         }
-                        ui::profiles::Event::Activate(id) => {
-                            self.active = Some(id);
-                            self.module = Module::Discover;
-                        }
                     }
-                }
-            });
+                });
             return;
         }
 
@@ -660,13 +743,15 @@ impl eframe::App for DesktopApp {
             .and_then(|id| self.profiles.iter().find(|p| &p.id == id))
             .cloned()
         else {
-            egui::CentralPanel::default().show(ui, |ui| {
-                ui.heading(t("Belum ada cluster"));
-                ui.label(t("Buat profile cluster di menu Cluster terlebih dahulu."));
-                if ui.button(t("Buat profile")).clicked() {
-                    self.module = Module::Profiles;
-                }
-            });
+            egui::CentralPanel::default()
+                .frame(theme::workspace(ui))
+                .show(ui, |ui| {
+                    ui.heading(t("Belum ada cluster"));
+                    ui.label(t("Buat profile cluster di menu Cluster terlebih dahulu."));
+                    if ui.button(t("Buat profile")).clicked() {
+                        self.module = Module::Profiles;
+                    }
+                });
             return;
         };
         let ws = self
@@ -680,22 +765,29 @@ impl eframe::App for DesktopApp {
         let conn = match &ws.conn {
             Some(Ok(conn)) => conn.clone(),
             None => {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(t("Menyiapkan koneksi…"));
+                egui::CentralPanel::default()
+                    .frame(theme::workspace(ui))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(t("Menyiapkan koneksi…"));
+                        });
                     });
-                });
                 return;
             }
             Some(Err(err)) => {
                 let err = err.clone();
-                egui::CentralPanel::default().show(ui, |ui| {
-                    crate::widgets::error_box(ui, &tf("Profile tidak bisa dipakai: {0}", &[&err]));
-                    if ui.button(t("Edit profile")).clicked() {
-                        self.module = Module::Profiles;
-                    }
-                });
+                egui::CentralPanel::default()
+                    .frame(theme::workspace(ui))
+                    .show(ui, |ui| {
+                        crate::widgets::error_box(
+                            ui,
+                            &tf("Profile tidak bisa dipakai: {0}", &[&err]),
+                        );
+                        if ui.button(t("Edit profile")).clicked() {
+                            self.module = Module::Profiles;
+                        }
+                    });
                 return;
             }
         };
@@ -730,13 +822,15 @@ impl eframe::App for DesktopApp {
             profiles: &self.profiles,
             nav: &mut nav,
         };
-        egui::CentralPanel::default().show(ui, |ui| match self.module {
-            Module::Console => ws.console.ui(ui, &mut cx),
-            Module::Discover => ws.discover.ui(ui, &mut cx),
-            Module::Indices => ws.indices.ui(ui, &mut cx),
-            Module::Dashboard => ws.dashboard.ui(ui, &mut cx),
-            Module::Profiles => {}
-        });
+        egui::CentralPanel::default()
+            .frame(theme::workspace(ui))
+            .show(ui, |ui| match self.module {
+                Module::Console => ws.console.ui(ui, &mut cx),
+                Module::Discover => ws.discover.ui(ui, &mut cx),
+                Module::Indices => ws.indices.ui(ui, &mut cx),
+                Module::Dashboard => ws.dashboard.ui(ui, &mut cx),
+                Module::Profiles => {}
+            });
         match nav {
             Some(Nav::Console { method, path, body }) => {
                 ws.console.append_request(&method, &path, body.as_ref());
@@ -781,6 +875,11 @@ pub const EN: &[(&str, &str)] = &[
         "Certificate verification is disabled for this profile.",
     ),
     ("Ganti tema", "Toggle theme"),
+    ("Terang", "Light"),
+    ("Gelap", "Dark"),
+    ("Perintah", "Commands"),
+    ("WORKSPACE", "WORKSPACE"),
+    ("Ciutkan / perluas navigasi", "Collapse / expand navigation"),
     ("Belum ada cluster", "No clusters yet"),
     (
         "Buat profile cluster di menu Cluster terlebih dahulu.",

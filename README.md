@@ -33,12 +33,19 @@ Shortcut Dev Tools: `Ctrl/Cmd+Enter` menjalankan request, `Ctrl+Space` membuka s
 
 Bahasa UI: pemilih **ID | EN** di top bar mengganti antarmuka antara Indonesia dan Inggris. Pilihan disimpan di `settings.json`.
 
+## Tampilan
+
+Tema awal memakai latar biru lembut, panel putih, dan navigasi sidebar yang bisa diciutkan. Sidebar otomatis ringkas pada jendela kecil. Tombol **Gelap / Terang** mengganti tema; cluster dan environment aktif tetap ditampilkan di header.
+
+Dev Tools mengisi tinggi workspace dan menyediakan **Bungkus baris** pada tampilan respons teks. Form cluster memisahkan koneksi, autentikasi, dan **Pengaturan lanjutan**.
+
 ## Struktur
 
 ```text
 src/
   main.rs            # Entry point dan konfigurasi jendela
   app.rs             # Shell: switcher cluster, navigasi, workspace per profile
+  theme.rs           # Warna, tipografi, panel, ikon vektor, dan navigasi bersama
   task.rs            # Kerja latar belakang (thread + channel) agar UI tidak blok
   profile.rs         # Model profile, penyimpanan JSON, keychain
   es/

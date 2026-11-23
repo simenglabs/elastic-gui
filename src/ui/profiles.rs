@@ -81,8 +81,13 @@ impl Profiles {
             self.test_result = Some(result);
         }
         egui::Panel::left("profile_list")
+            .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                right: 12,
+                ..Default::default()
+            }))
             .resizable(true)
             .default_size(240.0)
+            .max_size((ui.available_width() * 0.3).clamp(180.0, 280.0))
             .show(ui, |ui| {
                 ui.heading("Cluster");
                 ui.add_space(4.0);
@@ -137,10 +142,15 @@ impl Profiles {
                     self.select(&id, profiles);
                 }
             });
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .show(ui, |ui| self.editor(ui, profiles, store, &mut events));
-        });
+        egui::CentralPanel::default()
+            .frame(crate::theme::card(ui))
+            .show(ui, |ui| {
+                let form_width = ui.available_width().min(860.0);
+                egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+                    ui.set_max_width(form_width);
+                    self.editor(ui, profiles, store, &mut events);
+                });
+            });
         events
     }
 
@@ -171,17 +181,21 @@ impl Profiles {
                 ),
             );
         }
-        ui.add_space(6.0);
+        let field_width = (ui.available_width() - 164.0).clamp(170.0, 360.0);
+        ui.spacing_mut().text_edit_width = field_width;
+        ui.add_space(12.0);
+        ui.strong(t("Koneksi"));
         egui::Grid::new("profile_form")
             .num_columns(2)
-            .spacing([12.0, 8.0])
+            .min_col_width(140.0)
+            .spacing([16.0, 12.0])
             .show(ui, |ui| {
                 ui.label(t("Nama"));
                 ui.text_edit_singleline(&mut draft.name);
                 ui.end_row();
 
                 ui.label("Environment");
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     for env in Env::ALL {
                         ui.selectable_value(&mut draft.env, env, env.label());
                     }
@@ -195,7 +209,7 @@ impl Profiles {
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::TextEdit::singleline(url)
-                                    .desired_width(360.0)
+                                    .desired_width(field_width)
                                     .hint_text("https://host:9200"),
                             );
                             if ui.small_button("×").clicked() {
@@ -221,7 +235,14 @@ impl Profiles {
                     }
                 });
                 ui.end_row();
-
+            });
+        ui.add_space(8.0);
+        ui.strong(t("Autentikasi"));
+        egui::Grid::new("profile_auth")
+            .num_columns(2)
+            .min_col_width(140.0)
+            .spacing([16.0, 12.0])
+            .show(ui, |ui| {
                 ui.label(t("Autentikasi"));
                 egui::ComboBox::from_id_salt("auth_kind")
                     .selected_text(draft.auth.label())
@@ -252,17 +273,31 @@ impl Profiles {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.secret_input)
                             .password(true)
-                            .desired_width(360.0)
+                            .desired_width(field_width)
                             .hint_text(hint),
                     );
                     ui.end_row();
                 }
-
+            });
+        ui.add_space(8.0);
+        ui.checkbox(
+            &mut draft.read_only,
+            t("Read-only (blokir semua request yang mengubah data)"),
+        );
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new(t("Pengaturan lanjutan"))
+            .id_salt("profile_advanced")
+            .show(ui, |ui| {
+        egui::Grid::new("profile_advanced_form")
+            .num_columns(2)
+            .min_col_width(140.0)
+            .spacing([16.0, 12.0])
+            .show(ui, |ui| {
                 ui.label("CA cert (PEM)");
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut draft.ca_cert_path)
-                            .desired_width(300.0)
+                            .desired_width((field_width - 82.0).max(120.0))
                             .hint_text(t("kosong = CA sistem")),
                     );
                     if ui.button(t("Pilih…")).clicked()
@@ -278,7 +313,7 @@ impl Profiles {
                 ui.label(t("Fingerprint CA"));
                 ui.add(
                     egui::TextEdit::singleline(&mut draft.ca_fingerprint)
-                        .desired_width(360.0)
+                        .desired_width(field_width)
                         .hint_text(t("SHA-256, mis. dari output setup ES (opsional)")),
                 )
                 .on_hover_text(t("Jika diisi, sertifikat server diterima hanya bila fingerprint-nya cocok (menggantikan CA cert)."));
@@ -286,7 +321,7 @@ impl Profiles {
 
                 ui.label("Client cert (mTLS)");
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut draft.client_cert_path).desired_width(240.0).hint_text("cert PEM"));
+                    ui.add(egui::TextEdit::singleline(&mut draft.client_cert_path).desired_width((field_width - 82.0).max(120.0)).hint_text("cert PEM"));
                     if ui.button(t("Pilih…")).clicked()
                         && let Some(path) = rfd::FileDialog::new().pick_file()
                     {
@@ -297,7 +332,7 @@ impl Profiles {
 
                 ui.label("Client key (mTLS)");
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut draft.client_key_path).desired_width(240.0).hint_text("private key PEM"));
+                    ui.add(egui::TextEdit::singleline(&mut draft.client_key_path).desired_width((field_width - 82.0).max(120.0)).hint_text("private key PEM"));
                     if ui.button(t("Pilih…")).clicked()
                         && let Some(path) = rfd::FileDialog::new().pick_file()
                     {
@@ -308,7 +343,7 @@ impl Profiles {
 
                 ui.label("Cloud ID");
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.cloud_id).desired_width(300.0).hint_text("deployment:base64…"));
+                    ui.add(egui::TextEdit::singleline(&mut self.cloud_id).desired_width((field_width - 82.0).max(120.0)).hint_text("deployment:base64…"));
                     if ui.button(t("Isi URL")).clicked() {
                         match crate::es::tls::decode_cloud_id(&self.cloud_id) {
                             Ok(url) => {
@@ -335,7 +370,7 @@ impl Profiles {
                 ui.label("HTTP proxy");
                 ui.add(
                     egui::TextEdit::singleline(&mut draft.proxy)
-                        .desired_width(360.0)
+                        .desired_width(field_width)
                         .hint_text(t("http://user:pass@proxy:3128 (kosong = proxy sistem)")),
                 );
                 ui.end_row();
@@ -369,12 +404,7 @@ impl Profiles {
                 });
                 ui.end_row();
 
-                ui.label("Mode");
-                ui.checkbox(
-                    &mut draft.read_only,
-                    t("Read-only (blokir semua request yang mengubah data)"),
-                );
-                ui.end_row();
+            });
             });
 
         if draft.insecure {
@@ -396,7 +426,7 @@ impl Profiles {
             Some(self.secret_input.clone())
         };
         let mut duplicate = None;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if self.test.is_some() {
                 ui.spinner();
             } else if ui
@@ -409,7 +439,7 @@ impl Profiles {
                     test_connection(&profile, secret_value.as_deref())
                 }));
             }
-            if ui.button(t("Simpan")).clicked() {
+            if ui.add(crate::theme::primary(t("Simpan"))).clicked() {
                 if draft.ephemeral {
                     draft.ephemeral = false;
                     draft.id = Profile::default().id;
@@ -592,6 +622,8 @@ pub fn test_connection(profile: &Profile, secret: Option<&str>) -> Result<String
 
 /// X-05: terjemahan English untuk teks di file ini.
 pub const EN: &[(&str, &str)] = &[
+    ("Koneksi", "Connection"),
+    ("Pengaturan lanjutan", "Advanced settings"),
     ("Ekspor…", "Export…"),
     ("Tanpa password/API key", "Without passwords/API keys"),
     (

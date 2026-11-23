@@ -124,7 +124,7 @@ impl DataStreams {
             );
             if self.pending.is_some() || self.job.is_some() {
                 ui.spinner();
-            } else if ui.button(t("⟳ Muat ulang")).clicked() {
+            } else if ui.button(t("Muat ulang")).clicked() {
                 self.list = None;
             }
         });
@@ -147,7 +147,7 @@ impl DataStreams {
                 let name = ds["name"].as_str().unwrap_or_default().to_owned();
                 ui.horizontal(|ui| {
                     ui.heading(&name);
-                    if ui.small_button("✕").clicked() {
+                    if ui.small_button("×").clicked() {
                         self.selected = None;
                     }
                 });
@@ -323,7 +323,7 @@ impl Templates {
             ui.checkbox(&mut self.show_system, t("Tampilkan template bawaan"));
             if self.pending.is_some() || self.job.is_some() {
                 ui.spinner();
-            } else if ui.button(t("⟳ Muat ulang")).clicked() {
+            } else if ui.button(t("Muat ulang")).clicked() {
                 self.list = None;
             }
             if self.can_manage == Some(false) {
@@ -428,7 +428,7 @@ impl Templates {
             } else {
                 ui.heading(name.as_str());
             }
-            close = ui.small_button("✕").clicked();
+            close = ui.small_button("×").clicked();
         });
         if close {
             self.editing = None;

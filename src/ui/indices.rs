@@ -519,7 +519,7 @@ impl Indices {
             self.pending = Some(Pending::spawn(&ctx, move || load_rows(&conn)));
         }
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut self.view, View::Indices, "Index");
             ui.selectable_value(&mut self.view, View::DataStreams, "Data stream");
             ui.selectable_value(&mut self.view, View::Templates, "Template");
@@ -535,11 +535,17 @@ impl Indices {
         self.bulk_bar(ui, cx);
         if let Some(name) = self.selected.clone() {
             egui::Panel::right("index_detail")
+                .frame(crate::theme::card(ui).outer_margin(egui::Margin {
+                    left: 12,
+                    ..Default::default()
+                }))
                 .resizable(true)
                 .default_size(ui.available_width() * 0.45)
                 .show(ui, |ui| self.detail_ui(ui, cx, &name));
         }
-        egui::CentralPanel::default().show(ui, |ui| self.table(ui, cx));
+        egui::CentralPanel::default()
+            .frame(crate::theme::card(ui))
+            .show(ui, |ui| self.table(ui, cx));
         self.dialogs(&ctx, cx);
     }
 
@@ -562,7 +568,7 @@ impl Indices {
             }
             if self.pending.is_some() {
                 ui.spinner();
-            } else if ui.button(t("⟳ Muat ulang")).clicked() {
+            } else if ui.button(t("Muat ulang")).clicked() {
                 self.loaded = None;
             }
             if !cx.conn.read_only && ui.button(t("+ Buat index")).clicked() {
@@ -583,7 +589,7 @@ impl Indices {
         }
         match &self.message {
             Some(Ok(text)) => {
-                ui.colored_label(egui::Color32::from_rgb(0x2e, 0xa0, 0x43), text);
+                ui.colored_label(crate::theme::GREEN, text);
             }
             Some(Err(err)) => widgets::error_box(ui, err),
             None => {}
@@ -649,15 +655,15 @@ impl Indices {
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::exact(22.0))
             .column(Column::initial(300.0).clip(true).at_least(120.0))
-            .column(Column::initial(70.0))
+            .column(Column::initial(95.0))
             .column(Column::initial(60.0))
-            .column(Column::initial(40.0))
-            .column(Column::initial(40.0))
+            .column(Column::initial(54.0))
+            .column(Column::initial(54.0))
             .column(Column::initial(100.0))
             .column(Column::initial(90.0))
             .column(Column::initial(150.0))
             .column(Column::remainder().clip(true))
-            .header(22.0, |mut h| {
+            .header(38.0, |mut h| {
                 h.col(|_| {});
                 h.col(|ui| header(ui, t("Nama"), Col::Name, &mut sort_click));
                 h.col(|ui| header(ui, "Health", Col::Health, &mut sort_click));
@@ -672,7 +678,7 @@ impl Indices {
                 });
             })
             .body(|body| {
-                body.rows(20.0, rows.len(), |mut row| {
+                body.rows(crate::theme::ROW_HEIGHT, rows.len(), |mut row| {
                     let r = &rows[row.index()];
                     row.set_selected(selected.as_deref() == Some(r.name.as_str()));
                     row.col(|ui| {
@@ -687,24 +693,33 @@ impl Indices {
                         ui.label(&r.name);
                     });
                     row.col(|ui| {
-                        ui.label(
-                            RichText::new(format!("● {}", r.health)).color(health_color(&r.health)),
-                        );
+                        ui.horizontal(|ui| {
+                            crate::theme::dot(ui, health_color(&r.health));
+                            ui.label(&r.health);
+                        });
                     });
                     row.col(|ui| {
                         ui.label(&r.status);
                     });
                     row.col(|ui| {
-                        ui.label(r.pri.to_string());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(r.pri.to_string());
+                        });
                     });
                     row.col(|ui| {
-                        ui.label(r.rep.to_string());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(r.rep.to_string());
+                        });
                     });
                     row.col(|ui| {
-                        ui.label(widgets::format_count(r.docs));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(widgets::format_count(r.docs));
+                        });
                     });
                     row.col(|ui| {
-                        ui.label(widgets::format_bytes(r.size));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(widgets::format_bytes(r.size));
+                        });
                     });
                     row.col(|ui| {
                         ui.label(if r.created > 0 {
@@ -719,7 +734,7 @@ impl Indices {
                     row.col(|ui| {
                         let mut parts = r.aliases.clone();
                         if let Some(ds) = &r.data_stream {
-                            parts.insert(0, format!("⛁ {ds}"));
+                            parts.insert(0, format!("DS: {ds}"));
                         }
                         ui.weak(parts.join(", "));
                     });
@@ -774,7 +789,7 @@ impl Indices {
         ui.horizontal(|ui| {
             ui.heading(name);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("✕").clicked() {
+                if ui.small_button("×").clicked() {
                     self.selected = None;
                     self.detail = None;
                 }
@@ -1102,7 +1117,7 @@ impl Indices {
 
     /// Tab Shards (IDX-15) dan ILM (IDX-16).
     fn tab_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, cx: &mut Ctx, name: &str) {
-        let reload = ui.button(t("⟳ Muat ulang")).clicked();
+        let reload = ui.button(t("Muat ulang")).clicked();
         if self.tab == Tab::Shards {
             let stale = self.shards.as_ref().is_none_or(|(n, _)| n != name);
             if (stale || reload) && self.shards_pending.is_none() {
@@ -1166,9 +1181,9 @@ impl Indices {
                             ui.label(r["shard"].as_str().unwrap_or("-"));
                             ui.label(if primary { t("primer") } else { t("replika") });
                             let color = match state {
-                                "STARTED" => egui::Color32::from_rgb(0x2e, 0xa0, 0x43),
-                                "UNASSIGNED" => egui::Color32::from_rgb(0xd0, 0x3b, 0x3b),
-                                _ => egui::Color32::from_rgb(0xd4, 0xa7, 0x2c),
+                                "STARTED" => crate::theme::GREEN,
+                                "UNASSIGNED" => crate::theme::RED,
+                                _ => crate::theme::AMBER,
                             };
                             let state_label = ui.label(RichText::new(state).color(color));
                             if let Some(reason) = r["unassigned.reason"].as_str() {
@@ -2082,9 +2097,9 @@ fn add_field_form(ui: &mut egui::Ui, name: &str, field: &mut (String, String)) -
 
 fn health_color(health: &str) -> egui::Color32 {
     match health {
-        "green" => egui::Color32::from_rgb(0x2e, 0xa0, 0x43),
-        "yellow" => egui::Color32::from_rgb(0xd4, 0xa7, 0x2c),
-        "red" => egui::Color32::from_rgb(0xd0, 0x3b, 0x3b),
+        "green" => crate::theme::GREEN,
+        "yellow" => crate::theme::AMBER,
+        "red" => crate::theme::RED,
         _ => egui::Color32::GRAY,
     }
 }
@@ -2333,7 +2348,6 @@ pub const EN: &[(&str, &str)] = &[
     ("Cari index…", "Search indices…"),
     ("Tampilkan index sistem (.)", "Show system indices (.)"),
     ("semua", "all"),
-    ("⟳ Muat ulang", "⟳ Reload"),
     ("+ Buat index", "+ Create index"),
     ("Menjalankan aksi…", "Running action…"),
     ("Buka di Dev Tools:\n{0}", "Open in Dev Tools:\n{0}"),
