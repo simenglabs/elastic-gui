@@ -37,12 +37,20 @@ impl Module {
     ];
 
     fn label(self) -> &'static str {
-        match self {
-            Module::Discover => "Discover",
-            Module::Console => "Dev Tools",
-            Module::Dashboard => "Dashboard",
-            Module::Indices => t("Index"),
-            Module::Profiles => t("Cluster"),
+        self.label_in(i18n::lang())
+    }
+
+    // X-05: bentuk jamak English hanya cocok untuk nama modul, jadi tidak memakai kunci
+    // global "Index"/"Cluster" yang di modul lain berarti tunggal.
+    fn label_in(self, lang: Lang) -> &'static str {
+        match (self, lang) {
+            (Module::Discover, _) => "Discover",
+            (Module::Console, _) => "Dev Tools",
+            (Module::Dashboard, _) => "Dashboard",
+            (Module::Indices, Lang::Id) => "Index",
+            (Module::Indices, Lang::En) => "Indices",
+            (Module::Profiles, Lang::Id) => "Cluster",
+            (Module::Profiles, Lang::En) => "Clusters",
         }
     }
 }
@@ -733,8 +741,6 @@ impl eframe::App for DesktopApp {
 
 /// X-05: terjemahan English untuk teks di file ini.
 pub const EN: &[(&str, &str)] = &[
-    ("Index", "Indices"),
-    ("Cluster", "Clusters"),
     (
         "Simpan cluster + modul ini sebagai tab",
         "Save this cluster + module as a tab",
@@ -779,5 +785,18 @@ mod tests {
     #[test]
     fn semua_teks_diterjemahkan() {
         crate::i18n::assert_translated(include_str!("app.rs"), super::EN);
+    }
+
+    #[test]
+    fn label_modul_jamak_hanya_di_english() {
+        use super::{Lang, Module};
+        assert_eq!(Module::Indices.label_in(Lang::Id), "Index");
+        assert_eq!(Module::Indices.label_in(Lang::En), "Indices");
+        assert_eq!(Module::Profiles.label_in(Lang::En), "Clusters");
+        assert!(
+            !super::EN
+                .iter()
+                .any(|(k, _)| matches!(*k, "Index" | "Cluster"))
+        );
     }
 }

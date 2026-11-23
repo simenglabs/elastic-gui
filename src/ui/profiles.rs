@@ -84,7 +84,7 @@ impl Profiles {
             .resizable(true)
             .default_size(240.0)
             .show(ui, |ui| {
-                ui.heading(t("Cluster"));
+                ui.heading("Cluster");
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if ui
