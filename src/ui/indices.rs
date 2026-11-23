@@ -371,6 +371,8 @@ pub struct Indices {
     /// IDX-11: tampilan settings (JSON?) dan muat default.
     settings_json: bool,
     show_defaults: bool,
+    /// Reload hanya-default sedang berjalan: form settings yang sedang diisi jangan ditimpa.
+    defaults_reload: bool,
     /// IDX-13: tampilan mappings (JSON?).
     mappings_json: bool,
     highlighter: widgets::Highlighter,
@@ -421,7 +423,10 @@ impl Indices {
             }
         }
         if let Some(result) = poll(&mut self.detail_pending) {
-            self.settings_form = result.as_ref().ok().map(settings_form);
+            if rebuild_settings_form(self.defaults_reload, self.settings_form.is_some()) {
+                self.settings_form = result.as_ref().ok().map(settings_form);
+            }
+            self.defaults_reload = false;
             self.privs = result.as_ref().map(|d| d.privs).unwrap_or_default();
             self.detail = Some(result);
         }
@@ -721,9 +726,21 @@ impl Indices {
     fn select(&mut self, ctx: &egui::Context, conn: &Arc<Conn>, name: &str) {
         self.selected = Some(name.to_owned());
         self.detail = None;
+        self.defaults_reload = false;
         let conn = conn.clone();
         let name = name.to_owned();
         let defaults = self.show_defaults;
+        self.detail_pending = Some(Pending::spawn(ctx, move || {
+            load_detail(&conn, &name, defaults)
+        }));
+    }
+
+    /// IDX-11: muat ulang settings (toggle default) tanpa mengosongkan detail/form.
+    fn reload_settings(&mut self, ctx: &egui::Context, conn: &Arc<Conn>, name: &str) {
+        let conn = conn.clone();
+        let name = name.to_owned();
+        let defaults = self.show_defaults;
+        self.defaults_reload = true;
         self.detail_pending = Some(Pending::spawn(ctx, move || {
             load_detail(&conn, &name, defaults)
         }));
@@ -1030,7 +1047,7 @@ impl Indices {
             });
         if reload_settings {
             let ctx = ui.ctx().clone();
-            self.select(&ctx, cx.conn, name);
+            self.reload_settings(&ctx, cx.conn, name);
         }
         if let Some(action) = action {
             self.run(ui.ctx(), cx.conn, action);
@@ -2158,6 +2175,11 @@ fn flatten_settings(v: &Value, defaults: bool) -> Vec<(String, String, bool)> {
     out
 }
 
+/// Form settings dibangun ulang kecuali reload hanya-default menimpa form yang sudah ada.
+fn rebuild_settings_form(defaults_reload: bool, has_form: bool) -> bool {
+    !(defaults_reload && has_form)
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
@@ -2232,6 +2254,14 @@ mod tests {
         assert!(validate_index_name("a*").is_err());
         assert!(validate_index_name("a:b").is_err());
         assert!(validate_index_name(&"a".repeat(256)).is_err());
+    }
+
+    #[test]
+    fn form_dipertahankan_saat_reload_default() {
+        assert!(!rebuild_settings_form(true, true));
+        assert!(rebuild_settings_form(true, false));
+        assert!(rebuild_settings_form(false, true));
+        assert!(rebuild_settings_form(false, false));
     }
 
     #[test]
