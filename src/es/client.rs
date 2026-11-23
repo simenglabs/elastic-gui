@@ -112,6 +112,11 @@ pub fn is_ndjson(path: &str) -> bool {
         .any(|s| s == "_bulk" || s == "_msearch")
 }
 
+/// PRF-02: urutan percobaan node, melingkar mulai dari `start % len`.
+fn node_order(start: usize, len: usize) -> Vec<usize> {
+    (0..len).map(|i| (start % len + i) % len).collect()
+}
+
 pub struct Conn {
     http: reqwest::blocking::Client,
     urls: Vec<String>,
@@ -123,6 +128,8 @@ pub struct Conn {
     pub auth_kind: AuthKind,
     /// Jumlah request yang sedang berjalan (status bar).
     inflight: std::sync::atomic::AtomicUsize,
+    /// PRF-02: penghitung round-robin; tiap request mulai dari node berbeda.
+    next: std::sync::atomic::AtomicUsize,
 }
 
 /// Menurunkan penghitung request saat `send` selesai, apa pun hasilnya.
@@ -218,6 +225,7 @@ impl Conn {
             username: profile.username.clone(),
             auth_kind: profile.auth,
             inflight: Default::default(),
+            next: Default::default(),
         })
     }
 
@@ -260,7 +268,10 @@ impl Conn {
             "application/json"
         };
         let mut last_error = String::new();
-        for base in &self.urls {
+        // PRF-02: mulai dari node bergilir, lalu failover melingkar tiap node sekali.
+        let start = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        for idx in node_order(start, self.urls.len()) {
+            let base = &self.urls[idx];
             let mut request = self
                 .http
                 .request(http_method.clone(), format!("{base}{path}"))
@@ -358,6 +369,13 @@ pub fn live_conn() -> Option<Conn> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_order_melingkar() {
+        assert_eq!(node_order(0, 3), vec![0, 1, 2]);
+        assert_eq!(node_order(4, 3), vec![1, 2, 0]);
+        assert_eq!(node_order(7, 1), vec![0]);
+    }
 
     #[test]
     fn write_detection() {
