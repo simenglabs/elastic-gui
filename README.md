@@ -5,7 +5,7 @@ Aplikasi desktop native untuk Elasticsearch (Rust + [egui/eframe](https://docs.r
 Modul:
 
 - **Discover**: pilih index/alias/data stream, rentang waktu, query Lucene atau DSL, filter pills, histogram (drag untuk zoom), tabel virtualized dengan paging point-in-time, detail dokumen, dan top values per field.
-- **Dev Tools**: editor multi-request dengan autocomplete endpoint, query parameter, body JSON (dari spesifikasi API resmi ES 7/8/9), nama index, dan nama field. Ada juga history, multi tab, salin cURL, dan rapikan JSON.
+- **Dev Tools**: editor multi-request dengan autocomplete endpoint, query parameter, body JSON (dari spesifikasi API resmi ES 7/8/9), nama index, dan nama field. Ada juga history, multi tab, salin cURL, dan rapikan JSON. Blok JSON bisa dilipat lewat penanda ▾/▸ di gutter (hanya tampilan, teks tidak berubah).
 - **Dashboard**: panel Metric, Time series, Bar, Pie, Tabel, dan Markdown dengan waktu, query, dan filter global. Klik kategori untuk memfilter. Dashboard bisa diekspor dan diimpor sebagai JSON.
 - **Index**: daftar index (health, ukuran, alias, data stream), detail overview/settings/mappings, buat index, open/close, refresh/flush/clear cache, edit setting dinamis, tambah field, dan hapus (wajib ketik nama).
 - **Cluster**: profile per cluster (Basic, API key, Bearer; CA cert; header; failover node). Secret disimpan di keychain OS. Mode **read-only** memblokir semua request yang mengubah data, dan profile `prod` diberi penanda merah.
@@ -30,6 +30,8 @@ cargo run
 Shortcut Dev Tools: `Ctrl/Cmd+Enter` menjalankan request, `Ctrl+Space` membuka saran, `Ctrl/Cmd+I` merapikan JSON.
 
 `Ctrl/Cmd+K` membuka command palette untuk pindah modul, pindah cluster, atau membuka index di Discover.
+
+Bahasa UI: pemilih **ID | EN** di top bar mengganti antarmuka antara Indonesia dan Inggris. Pilihan disimpan di `settings.json`.
 
 ## Struktur
 

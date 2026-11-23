@@ -9,31 +9,41 @@
 
 ### Status implementasi (23 November 2026)
 
-- **P0 selesai:** semua item P0 di bagian 7, termasuk deteksi capability (PRF-11), preview pola `_resolve` (DIS-01), sort `.keyword` otomatis (DIS-32), opsi total akurat (DIS-34), dan request ditampilkan sebelum aksi index.
-- **P1 selesai:**
-  - Cluster: deteksi privilege per index dan untuk template (PRF-12), ekspor/impor profile tanpa secret (PRF-16), duplikat profile (PRF-17).
-  - Dev Tools: lint (CON-06), link dokumentasi (CON-30), impor cURL (CON-62), snippet bawaan (CON-63), serta tab, history, dan salin cURL.
-  - Discover: ES|QL (DIS-12), KQL (DIS-13), history query (DIS-15), penanda konflik tipe (DIS-41), top values akurat (DIS-43), saved search (DIS-50), ekspor CSV dengan `_source` difilter (DIS-51).
-  - Dashboard: tabel dengan sort dan ekspor CSV (DSH-07), Inspect (DSH-17), impor/ekspor (DSH-18).
-  - Index: alias (IDX-14), tab Shards + allocation explain (IDX-15), tab ILM + retry (IDX-16), force merge (IDX-34), rollover (IDX-37), data stream (IDX-50), index/component template + simulasi (IDX-51, IDX-52).
-  - Lintas modul: tema terang/gelap (X-03), status bar (X-06).
-- **Penyesuaian:** cluster target nyata ES 9.5, jadi spec 9.x ditambahkan (`src/es/spec/es9.json`). Layout dashboard memakai lebar 1–3 kolom dan tombol geser (◀ ▶), bukan drag/resize bebas (DSH-02).
-- **P1 selesai (lanjutan):**
-  - Cluster: PKI/mTLS dan Cloud ID (PRF-04), pin fingerprint TLS (PRF-06), tab cluster + modul (PRF-15).
-  - Dev Tools: variabel `${X}` (CON-07), saran live nama ILM policy/pipeline/template/repository/node/user/role (CON-23), cluster target per tab (CON-64).
-  - Discover: data view per pola (DIS-03), autocomplete query bar dengan `_terms_enum` (DIS-14), highlight (DIS-35), dokumen sekitar (DIS-38), tree field (DIS-44).
-  - Dashboard: panel pencarian tersimpan (DSH-10), brush time series (DSH-14).
-  - Index: aksi massal (IDX-05), tab dokumen (IDX-17), reindex dengan progress + batal (IDX-36), Inspect aksi terakhir (X-02).
-- **P2 selesai:**
-  - Cluster: HTTP proxy (PRF-08).
-  - Dev Tools: saran nilai `_terms_enum` di body (CON-29), cancel task di server lewat `X-Opaque-Id` (CON-42).
-  - Discover: cross-cluster search `remote:*` (DIS-07), filter sebagai DSL + pin (DIS-18), breakdown histogram (DIS-23), edit/hapus dokumen dengan `if_seq_no` (DIS-39), async search untuk rentang di atas 30 hari (DIS-54).
-  - Dashboard: drag pindah + resize panel (DSH-02), panel raw DSL/ES|QL (DSH-11), panel kontrol filter (DSH-12), panel dari cluster lain (DSH-19).
-  - Index: wizard setting statis close → update → open (IDX-12), clone/shrink/split (IDX-38), delete/update by query (IDX-39), legacy template (IDX-53).
-  - Lintas modul: command palette Ctrl/Cmd+K (X-04).
-- **Belum:** UI bahasa Inggris (X-05). Butuh lapisan terjemahan untuk ratusan string di semua modul; sengaja tidak dikerjakan setengah jalan.
-- **Catatan verifikasi:** aksi tulis (reindex, by query, edit/hapus dokumen, setting statis, clone/shrink/split, aksi massal) baru diuji kompilasi, unit test, dan bentuk request. Cluster uji adalah produksi, jadi test live selalu read-only.
-- **Penyesuaian PRF-15:** diwujudkan sebagai tab (cluster + modul) yang bisa dipindah cepat dengan state tiap cluster tetap hidup, bukan dua cluster berdampingan di layar yang sama.
+Bagian ini menggantikan klaim "P0 selesai" sebelumnya, yang terlalu luas. Pernyataan di bawah dibatasi pada apa yang benar-benar sudah diperiksa.
+
+**Terimplementasi di kode (lulus `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`):**
+
+- Cluster: deteksi capability dan privilege per index/template (PRF-11, PRF-12), PKI/mTLS dan Cloud ID (PRF-04), pin fingerprint TLS (PRF-06), HTTP proxy (PRF-08), tab cluster + modul (PRF-15), ekspor/impor profile tanpa secret (PRF-16), duplikat profile (PRF-17), failover node dengan round-robin (PRF-02).
+- Dev Tools: lint (CON-06), variabel `${X}` (CON-07), saran live (CON-23), saran nilai `_terms_enum` (CON-29), link dokumentasi (CON-30), cancel task via `X-Opaque-Id` (CON-42), impor cURL (CON-62), snippet bawaan (CON-63), cluster target per tab (CON-64), serta tab, history, dan salin cURL. Folding JSON di editor (CON-09): penanda ▾/▸ di gutter, hanya visual (teks tidak berubah).
+- Discover: data view per pola (DIS-03), `remote:*` (DIS-07), ES|QL (DIS-12), KQL (DIS-13), autocomplete `_terms_enum` (DIS-14), history query (DIS-15), filter sebagai DSL + pin (DIS-18), breakdown histogram (DIS-23), urutan kolom bisa diubah (DIS-31: ◀▶ di header tabel, ↑↓ di sidebar), preview pola `_resolve` (DIS-01), sort `.keyword` otomatis (DIS-32), total akurat (DIS-34), highlight (DIS-35), dokumen sekitar (DIS-38), edit/hapus dokumen dengan `if_seq_no` (DIS-39), penanda konflik tipe (DIS-41), top values akurat dengan statistik numerik min/max/avg/sum/count (DIS-43), tree field (DIS-44), saved search (DIS-50), ekspor CSV (DIS-51), async search di atas 30 hari (DIS-54).
+- Dashboard: tabel dengan sort dan ekspor CSV (DSH-07), panel pencarian tersimpan (DSH-10), brush time series dan klik series untuk memfilter (DSH-14), Inspect (DSH-17), impor/ekspor (DSH-18).
+- Index: aksi massal (IDX-05), settings dalam tampilan Table/JSON dengan "Tampilkan default" (IDX-11), mappings dalam tampilan Tree/JSON (IDX-13), alias (IDX-14), tab Shards + allocation explain (IDX-15), tab ILM + retry (IDX-16), tab dokumen (IDX-17), force merge (IDX-34), reindex dengan progress + batal (IDX-36), rollover (IDX-37), data stream (IDX-50), index/component template + simulasi (IDX-51, IDX-52).
+- Lintas modul: tema terang/gelap (X-03), status bar (X-06), Inspect aksi terakhir (X-02), UI bahasa Indonesia/Inggris dengan pemilih ID | EN di top bar, tersimpan di `settings.json` (X-05).
+- Perbaikan yang ditemukan saat pengukuran NFR: pembacaan keychain OS dipindah dari thread UI, karena sebelumnya memblokir startup di macOS.
+
+**Pengukuran NFR (macOS, release; detail di [`docs/plans/nfr-results.md`](plans/nfr-results.md)):**
+
+| Pengukuran | Hasil | Target |
+|---|---|---|
+| Startup sampai frame pertama | 683 ms | <= 1 dtk |
+| RSS saat frame pertama | 88 MB | <= 200 MB |
+| Highlight 5.000 baris Console | 0,64 ms | < 50 ms |
+| Filter + sort 10.000 baris index | 0,46 ms | < 20 ms |
+
+Startup diukur dengan `ELASTIC_GUI_TIMING=1 target/release/elastic-gui` memakai profile ENV, setelah perbaikan keychain.
+
+**Belum diverifikasi (jangan dianggap selesai):**
+
+- Tampilan GUI belum pernah diperiksa secara visual oleh sesi otomatis; yang dicek hanya kompilasi, test unit, dan bentuk request.
+- Aksi tulis (buat/hapus/close index, settings, alias, reindex, by-query, edit/hapus dokumen, static settings, clone/shrink/split, aksi massal, simpan template) hanya diuji lewat kompilasi, test unit, dan bentuk request, karena cluster uji adalah cluster produksi.
+- Hanya macOS + ES 9.5 yang pernah dijalankan. Windows, Linux (termasuk fallback keychain), ES 7.17/8.x, dan serverless belum diuji.
+- Belum ada installer maupun code signing (PRD Q6 masih terbuka).
+
+**Penyesuaian dari spec awal:**
+
+- Cluster target nyata ES 9.5, jadi spec 9.x ditambahkan (`src/es/spec/es9.json`).
+- Layout dashboard memakai lebar 1–3 kolom dan tombol geser (◀ ▶), bukan drag/resize bebas (DSH-02).
+- PRF-15 diwujudkan sebagai tab (cluster + modul) yang bisa dipindah cepat dengan state tiap cluster tetap hidup, bukan dua cluster berdampingan di layar yang sama.
 
 ---
 
