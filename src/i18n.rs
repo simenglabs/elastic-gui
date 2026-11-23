@@ -65,11 +65,15 @@ const TABLES: &[&[(&str, &str)]] = &[
     crate::widgets::time::EN,
     crate::widgets::filters::EN,
     crate::es::catalog::EN,
+    crate::es::client::EN,
+    crate::es::tls::EN,
     crate::es::query::EN,
     crate::es::kql::EN,
     crate::ui::discover::EN,
     crate::ui::console::EN,
     crate::ui::dashboard::EN,
+    crate::ui::indices::EN,
+    crate::ui::streams::EN,
 ];
 
 fn english() -> &'static HashMap<&'static str, &'static str> {

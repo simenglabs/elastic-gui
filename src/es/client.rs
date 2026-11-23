@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use serde_json::Value;
 
+use crate::i18n::{t, tf};
 use crate::profile::{AuthKind, Profile};
 
 #[derive(Clone, Debug)]
@@ -151,7 +152,7 @@ impl Conn {
         let proxy = profile.proxy.trim();
         if !proxy.is_empty() {
             let proxy =
-                reqwest::Proxy::all(proxy).map_err(|e| format!("Proxy tidak valid: {e}"))?;
+                reqwest::Proxy::all(proxy).map_err(|e| tf("Proxy tidak valid: {0}", &[&e]))?;
             builder = builder.proxy(proxy);
         }
         // PRF-04: client cert + key digabung jadi satu PEM.
@@ -162,15 +163,15 @@ impl Conn {
             ("", "") => None,
             (cert, key) if !cert.is_empty() && !key.is_empty() => {
                 let mut pem = std::fs::read(cert)
-                    .map_err(|e| format!("Gagal membaca client cert {cert}: {e}"))?;
+                    .map_err(|e| tf("Gagal membaca client cert {0}: {1}", &[&cert, &e]))?;
                 pem.push(b'\n');
                 pem.extend(
                     std::fs::read(key)
-                        .map_err(|e| format!("Gagal membaca private key {key}: {e}"))?,
+                        .map_err(|e| tf("Gagal membaca private key {0}: {1}", &[&key, &e]))?,
                 );
                 Some(pem)
             }
-            _ => return Err("Client cert dan private key harus diisi keduanya.".into()),
+            _ => return Err(t("Client cert dan private key harus diisi keduanya.").into()),
         };
         let fingerprint = profile.ca_fingerprint.trim();
         if !fingerprint.is_empty() && !profile.insecure {
@@ -181,15 +182,15 @@ impl Conn {
         } else {
             let ca = profile.ca_cert_path.trim();
             if !ca.is_empty() {
-                let pem =
-                    std::fs::read(ca).map_err(|e| format!("Gagal membaca CA cert {ca}: {e}"))?;
+                let pem = std::fs::read(ca)
+                    .map_err(|e| tf("Gagal membaca CA cert {0}: {1}", &[&ca, &e]))?;
                 let cert = reqwest::Certificate::from_pem(&pem)
-                    .map_err(|e| format!("CA cert tidak valid: {e}"))?;
+                    .map_err(|e| tf("CA cert tidak valid: {0}", &[&e]))?;
                 builder = builder.add_root_certificate(cert);
             }
             if let Some(pem) = &identity {
                 let id = reqwest::Identity::from_pem(pem)
-                    .map_err(|e| format!("Client cert/key tidak valid: {e}"))?;
+                    .map_err(|e| tf("Client cert/key tidak valid: {0}", &[&e]))?;
                 builder = builder.identity(id);
             }
         }
@@ -215,7 +216,7 @@ impl Conn {
             .filter(|u| !u.is_empty())
             .collect();
         if urls.is_empty() {
-            return Err("Profile belum punya URL node.".into());
+            return Err(t("Profile belum punya URL node.").into());
         }
         Ok(Self {
             http,
@@ -253,15 +254,16 @@ impl Conn {
     ) -> Result<Response, String> {
         let method = method.to_ascii_uppercase();
         if self.read_only && is_write(&method, path) {
-            return Err(format!(
-                "Profile read-only: {method} {path} diblokir karena dapat mengubah data."
+            return Err(tf(
+                "Profile read-only: {0} {1} diblokir karena dapat mengubah data.",
+                &[&method, &path],
             ));
         }
         self.inflight
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let _guard = InflightGuard(&self.inflight);
         let http_method = reqwest::Method::from_bytes(method.as_bytes())
-            .map_err(|_| format!("Method tidak dikenal: {method}"))?;
+            .map_err(|_| tf("Method tidak dikenal: {0}", &[&method]))?;
         let path = format!("/{}", path.trim().trim_start_matches('/'));
         let content_type = if is_ndjson(&path) {
             "application/x-ndjson"
@@ -351,10 +353,11 @@ fn describe_reqwest(err: &reqwest::Error) -> String {
         source = cause.source();
     }
     if text.contains("certificate") || text.contains("UnknownIssuer") {
-        text.push_str(
-            "\nSertifikat tidak bisa diverifikasi. Tambahkan CA cert di profile, \
-             atau aktifkan \"Lewati verifikasi TLS\" (tidak aman).",
-        );
+        text.push('\n');
+        text.push_str(&tf(
+            "Sertifikat tidak bisa diverifikasi. Tambahkan CA cert di profile, atau aktifkan \"{0}\".",
+            &[&t("Lewati verifikasi sertifikat (tidak aman)")],
+        ));
     }
     text
 }
@@ -392,9 +395,53 @@ pub fn live_conn() -> Option<Conn> {
     Some(Conn::new(&profile, secret.as_deref()).expect("profile env valid"))
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("Proxy tidak valid: {0}", "Invalid proxy: {0}"),
+    (
+        "Gagal membaca client cert {0}: {1}",
+        "Failed to read client cert {0}: {1}",
+    ),
+    (
+        "Gagal membaca private key {0}: {1}",
+        "Failed to read private key {0}: {1}",
+    ),
+    (
+        "Client cert dan private key harus diisi keduanya.",
+        "Client cert and private key must both be set.",
+    ),
+    (
+        "Gagal membaca CA cert {0}: {1}",
+        "Failed to read CA cert {0}: {1}",
+    ),
+    ("CA cert tidak valid: {0}", "Invalid CA cert: {0}"),
+    (
+        "Client cert/key tidak valid: {0}",
+        "Invalid client cert/key: {0}",
+    ),
+    (
+        "Profile belum punya URL node.",
+        "The profile has no node URL yet.",
+    ),
+    (
+        "Profile read-only: {0} {1} diblokir karena dapat mengubah data.",
+        "Read-only profile: {0} {1} blocked because it could modify data.",
+    ),
+    ("Method tidak dikenal: {0}", "Unknown method: {0}"),
+    (
+        "Sertifikat tidak bisa diverifikasi. Tambahkan CA cert di profile, atau aktifkan \"{0}\".",
+        "The certificate could not be verified. Add a CA cert to the profile, or enable \"{0}\".",
+    ),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("client.rs"), EN);
+    }
 
     #[test]
     fn source_ready_memakai_conn_yang_sama() {

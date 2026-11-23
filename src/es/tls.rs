@@ -9,6 +9,8 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 
+use crate::i18n::{t, tf};
+
 /// Fingerprint SHA-256 hex, dengan atau tanpa `:` (format output setup ES 8+).
 pub fn parse_fingerprint(text: &str) -> Result<Vec<u8>, String> {
     let hex: String = text.chars().filter(|c| c.is_ascii_hexdigit()).collect();
@@ -17,7 +19,7 @@ pub fn parse_fingerprint(text: &str) -> Result<Vec<u8>, String> {
         .filter(|c| !matches!(c, ':' | ' ' | '-'))
         .collect();
     if hex.len() != 64 || cleaned.len() != 64 {
-        return Err("Fingerprint harus SHA-256: 64 digit hex (boleh dipisah ':').".into());
+        return Err(t("Fingerprint harus SHA-256: 64 digit hex (boleh dipisah ':').").into());
     }
     (0..32)
         .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|e| e.to_string()))
@@ -32,17 +34,17 @@ pub fn decode_cloud_id(cloud_id: &str) -> Result<String, String> {
         .map_or(cloud_id.trim(), |(_, b)| b);
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
-        .map_err(|_| "Cloud ID tidak valid (bukan base64).")?;
-    let text = String::from_utf8(bytes).map_err(|_| "Cloud ID tidak valid (bukan UTF-8).")?;
+        .map_err(|_| t("Cloud ID tidak valid (bukan base64)."))?;
+    let text = String::from_utf8(bytes).map_err(|_| t("Cloud ID tidak valid (bukan UTF-8)."))?;
     let mut parts = text.split('$');
     let host = parts
         .next()
         .filter(|h| !h.is_empty())
-        .ok_or("Cloud ID tanpa host.")?;
+        .ok_or(t("Cloud ID tanpa host."))?;
     let es = parts
         .next()
         .filter(|h| !h.is_empty())
-        .ok_or("Cloud ID tanpa UUID Elasticsearch.")?;
+        .ok_or(t("Cloud ID tanpa UUID Elasticsearch."))?;
     let (host, port) = host.split_once(':').unwrap_or((host, "443"));
     Ok(format!("https://{es}.{host}:{port}"))
 }
@@ -71,7 +73,7 @@ impl ServerCertVerifier for PinVerifier {
             Ok(ServerCertVerified::assertion())
         } else {
             Err(rustls::Error::General(
-                "fingerprint sertifikat server tidak cocok dengan yang dipin di profile".into(),
+                t("fingerprint sertifikat server tidak cocok dengan yang dipin di profile").into(),
             ))
         }
     }
@@ -131,21 +133,54 @@ pub fn pinned_config(
         Some(pem) => {
             let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(pem)
                 .collect::<Result<_, _>>()
-                .map_err(|e| format!("Client cert tidak valid: {e}"))?;
+                .map_err(|e| tf("Client cert tidak valid: {0}", &[&e]))?;
             let key = PrivateKeyDer::from_pem_slice(pem)
-                .map_err(|e| format!("Private key tidak valid: {e}"))?;
+                .map_err(|e| tf("Private key tidak valid: {0}", &[&e]))?;
             builder
                 .with_client_auth_cert(certs, key)
-                .map_err(|e| format!("Client cert ditolak: {e}"))?
+                .map_err(|e| tf("Client cert ditolak: {0}", &[&e]))?
         }
     };
     config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Ok(config)
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    (
+        "Fingerprint harus SHA-256: 64 digit hex (boleh dipisah ':').",
+        "The fingerprint must be SHA-256: 64 hex digits (':' separators allowed).",
+    ),
+    (
+        "Cloud ID tidak valid (bukan base64).",
+        "Invalid Cloud ID (not base64).",
+    ),
+    (
+        "Cloud ID tidak valid (bukan UTF-8).",
+        "Invalid Cloud ID (not UTF-8).",
+    ),
+    ("Cloud ID tanpa host.", "Cloud ID has no host."),
+    (
+        "Cloud ID tanpa UUID Elasticsearch.",
+        "Cloud ID has no Elasticsearch UUID.",
+    ),
+    (
+        "fingerprint sertifikat server tidak cocok dengan yang dipin di profile",
+        "the server certificate fingerprint does not match the one pinned in the profile",
+    ),
+    ("Client cert tidak valid: {0}", "Invalid client cert: {0}"),
+    ("Private key tidak valid: {0}", "Invalid private key: {0}"),
+    ("Client cert ditolak: {0}", "Client cert rejected: {0}"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("tls.rs"), EN);
+    }
 
     #[test]
     fn parses_fingerprints() {

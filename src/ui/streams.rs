@@ -4,6 +4,7 @@ use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 
 use super::Ctx;
+use crate::i18n::{t, tf};
 use crate::task::{Pending, poll};
 use crate::widgets::{self, Confirm};
 
@@ -65,7 +66,7 @@ fn confirm_ui(
                 c.method,
                 c.path,
                 c.body,
-                format!("{} selesai.", c.title.trim_end_matches('?')),
+                tf("{0} selesai.", &[&c.title.trim_end_matches('?')]),
             ));
         }
         Confirm::No => *confirm = None,
@@ -118,12 +119,12 @@ impl DataStreams {
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.filter)
-                    .hint_text("Cari data stream…")
+                    .hint_text(t("Cari data stream…"))
                     .desired_width(240.0),
             );
             if self.pending.is_some() || self.job.is_some() {
                 ui.spinner();
-            } else if ui.button("⟳ Muat ulang").clicked() {
+            } else if ui.button(t("⟳ Muat ulang")).clicked() {
                 self.list = None;
             }
         });
@@ -155,8 +156,8 @@ impl DataStreams {
                         let path = format!("/{name}/_rollover");
                         if ui.button("Rollover").on_hover_text(describe("POST", &path, None)).clicked() {
                             self.confirm = Some(PendingConfirm {
-                                title: "Rollover?".into(),
-                                message: format!("{name} akan menulis ke backing index baru."),
+                                title: t("Rollover?").into(),
+                                message: tf("{0} akan menulis ke backing index baru.", &[&name]),
                                 expected: None,
                                 method: "POST",
                                 path,
@@ -164,11 +165,11 @@ impl DataStreams {
                             });
                         }
                         let path = format!("/_data_stream/{name}");
-                        if ui.button("Hapus").on_hover_text(describe("DELETE", &path, None)).clicked() {
+                        if ui.button(t("Hapus")).on_hover_text(describe("DELETE", &path, None)).clicked() {
                             self.typed.clear();
                             self.confirm = Some(PendingConfirm {
-                                title: "Hapus data stream?".into(),
-                                message: format!("{name} beserta SEMUA backing index dan dokumennya akan dihapus permanen."),
+                                title: t("Hapus data stream?").into(),
+                                message: tf("{0} beserta SEMUA backing index dan dokumennya akan dihapus permanen.", &[&name]),
                                 expected: Some(name.clone()),
                                 method: "DELETE",
                                 path,
@@ -198,7 +199,7 @@ impl DataStreams {
                             "Generasi",
                             "Backing index",
                         ] {
-                            ui.strong(h);
+                            ui.strong(t(h));
                         }
                         ui.end_row();
                         for ds in streams.iter().filter(|d| {
@@ -220,7 +221,7 @@ impl DataStreams {
                                 .or_else(|| {
                                     ds["lifecycle"]["data_retention"]
                                         .as_str()
-                                        .map(|r| format!("retensi {r}"))
+                                        .map(|r| tf("retensi {0}", &[&r]))
                                 })
                                 .unwrap_or_else(|| "-".into());
                             ui.label(lifecycle);
@@ -230,7 +231,7 @@ impl DataStreams {
                         }
                     });
                 if streams.is_empty() {
-                    ui.weak("Tidak ada data stream.");
+                    ui.weak(t("Tidak ada data stream."));
                 }
             });
         });
@@ -318,15 +319,15 @@ impl Templates {
         }
         let writable = !cx.conn.read_only && self.can_manage != Some(false);
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("Cari template…").desired_width(240.0));
-            ui.checkbox(&mut self.show_system, "Tampilkan template bawaan");
+            ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text(t("Cari template…")).desired_width(240.0));
+            ui.checkbox(&mut self.show_system, t("Tampilkan template bawaan"));
             if self.pending.is_some() || self.job.is_some() {
                 ui.spinner();
-            } else if ui.button("⟳ Muat ulang").clicked() {
+            } else if ui.button(t("⟳ Muat ulang")).clicked() {
                 self.list = None;
             }
             if self.can_manage == Some(false) {
-                ui.weak("Tanpa privilege manage_index_templates: hanya baca.");
+                ui.weak(t("Tanpa privilege manage_index_templates: hanya baca."));
             }
             if writable {
                 if ui.button("+ Index template").clicked() {
@@ -364,7 +365,7 @@ impl Templates {
                     .num_columns(5)
                     .show(ui, |ui| {
                         for h in ["Nama", "Jenis", "Pola index", "Prioritas", "Komponen"] {
-                            ui.strong(h);
+                            ui.strong(t(h));
                         }
                         ui.end_row();
                         for (kind, name, body) in &list {
@@ -422,7 +423,7 @@ impl Templates {
         let mut close = false;
         ui.horizontal(|ui| {
             if *is_new {
-                ui.label("Nama");
+                ui.label(t("Nama"));
                 ui.add(egui::TextEdit::singleline(name).desired_width(200.0));
             } else {
                 ui.heading(name.as_str());
@@ -437,15 +438,15 @@ impl Templates {
             return;
         };
         let parsed: Result<Value, String> =
-            serde_json::from_str(text).map_err(|e| format!("JSON tidak valid: {e}"));
+            serde_json::from_str(text).map_err(|e| tf("JSON tidak valid: {0}", &[&e]));
         let path = kind.path(name.trim());
         ui.horizontal(|ui| {
             if *kind == Kind::Index && !name.trim().is_empty() {
                 // `_simulate` dengan body = hasil merge tanpa menyimpan.
                 let sim_path = format!("/_index_template/_simulate/{}", name.trim());
                 if ui
-                    .button("Simulasi")
-                    .on_hover_text("Hasil gabungan template + komponen (tanpa menyimpan)")
+                    .button(t("Simulasi"))
+                    .on_hover_text(t("Hasil gabungan template + komponen (tanpa menyimpan)"))
                     .clicked()
                 {
                     let conn = cx.conn.clone();
@@ -458,7 +459,7 @@ impl Templates {
             if writable {
                 let ok = parsed.is_ok() && !name.trim().is_empty();
                 if ui
-                    .add_enabled(ok, egui::Button::new("Simpan"))
+                    .add_enabled(ok, egui::Button::new(t("Simpan")))
                     .on_hover_text(describe("PUT", &path, parsed.as_ref().ok()))
                     .clicked()
                     && let Ok(body) = &parsed
@@ -469,20 +470,21 @@ impl Templates {
                         "PUT",
                         path.clone(),
                         Some(body.clone()),
-                        format!("Template {} disimpan.", name.trim()),
+                        tf("Template {0} disimpan.", &[&name.trim()]),
                     ));
                 }
                 if !*is_new
                     && ui
-                        .button("Hapus")
+                        .button(t("Hapus"))
                         .on_hover_text(describe("DELETE", &path, None))
                         .clicked()
                 {
                     self.typed.clear();
                     self.confirm = Some(PendingConfirm {
-                        title: "Hapus template?".into(),
-                        message: format!(
-                            "Template {name} akan dihapus. Index yang sudah ada tidak terpengaruh."
+                        title: t("Hapus template?").into(),
+                        message: tf(
+                            "Template {0} akan dihapus. Index yang sudah ada tidak terpengaruh.",
+                            &[&name],
                         ),
                         expected: None,
                         method: "DELETE",
@@ -510,7 +512,7 @@ impl Templates {
                 match &self.simulate {
                     Some(Ok(v)) => {
                         ui.separator();
-                        ui.label(RichText::new("Hasil simulasi").strong());
+                        ui.label(RichText::new(t("Hasil simulasi")).strong());
                         if let Some(overlaps) =
                             v["overlapping"].as_array().filter(|o| !o.is_empty())
                         {
@@ -518,7 +520,7 @@ impl Templates {
                                 overlaps.iter().filter_map(|o| o["name"].as_str()).collect();
                             widgets::warn_box(
                                 ui,
-                                &format!("Pola tumpang tindih dengan: {}", names.join(", ")),
+                                &tf("Pola tumpang tindih dengan: {0}", &[&names.join(", ")]),
                             );
                         }
                         widgets::json_tree(ui, &v["template"], egui::Id::unique("tpl_sim"));
@@ -574,9 +576,68 @@ fn load_templates(conn: &crate::es::Conn) -> Result<Vec<Template>, String> {
     Ok(out)
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("Generasi", "Generation"),
+    ("Jenis", "Kind"),
+    ("Pola index", "Index pattern"),
+    ("Prioritas", "Priority"),
+    ("Komponen", "Components"),
+    ("{0} selesai.", "{0} finished."),
+    ("Cari data stream…", "Search data streams…"),
+    (
+        "{0} akan menulis ke backing index baru.",
+        "{0} will write to a new backing index.",
+    ),
+    ("Hapus data stream?", "Delete data stream?"),
+    (
+        "{0} beserta SEMUA backing index dan dokumennya akan dihapus permanen.",
+        "{0} and ALL its backing indices and documents will be permanently deleted.",
+    ),
+    ("retensi {0}", "retention {0}"),
+    ("Tidak ada data stream.", "No data streams."),
+    ("Cari template…", "Search templates…"),
+    ("Tampilkan template bawaan", "Show built-in templates"),
+    (
+        "Tanpa privilege manage_index_templates: hanya baca.",
+        "Without the manage_index_templates privilege: read-only.",
+    ),
+    ("JSON tidak valid: {0}", "Invalid JSON: {0}"),
+    ("Simulasi", "Simulate"),
+    (
+        "Hasil gabungan template + komponen (tanpa menyimpan)",
+        "Merged result of template + components (without saving)",
+    ),
+    ("Template {0} disimpan.", "Template {0} saved."),
+    ("Hapus template?", "Delete template?"),
+    (
+        "Template {0} akan dihapus. Index yang sudah ada tidak terpengaruh.",
+        "Template {0} will be deleted. Existing indices are not affected.",
+    ),
+    ("Hasil simulasi", "Simulation result"),
+    (
+        "Pola tumpang tindih dengan: {0}",
+        "Pattern overlaps with: {0}",
+    ),
+    ("Rollover?", "Rollover?"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("streams.rs"), EN);
+        crate::i18n::assert_keys([
+            "Nama",
+            "Generasi",
+            "Jenis",
+            "Pola index",
+            "Prioritas",
+            "Komponen",
+        ]);
+    }
 
     #[test]
     #[ignore = "butuh cluster"]

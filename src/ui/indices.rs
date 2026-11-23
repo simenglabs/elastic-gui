@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 use super::{Ctx, Nav};
 use crate::es::Conn;
+use crate::i18n::{self, t, tf};
 use crate::task::{Pending, poll};
 use crate::widgets::{self, Confirm};
 
@@ -300,36 +301,40 @@ impl Action {
 
     fn done_message(&self) -> String {
         match self {
-            Action::Create { name, .. } => format!("Index {name} dibuat."),
-            Action::Delete(n) => format!("Index {n} dihapus."),
-            Action::Open(n) => format!("Index {n} dibuka."),
-            Action::Close(n) => format!("Index {n} ditutup."),
-            Action::Refresh(n) => format!("Index {n} di-refresh."),
-            Action::Flush(n) => format!("Index {n} di-flush."),
-            Action::ClearCache(n) => format!("Cache index {n} dibersihkan."),
-            Action::UpdateSettings(n, _) => format!("Settings {n} diperbarui."),
-            Action::AddField(n, _) => format!("Field baru ditambahkan ke mapping {n}."),
-            Action::IlmRetry(n) => format!("ILM {n} dicoba ulang."),
-            Action::Aliases(n, _) => format!("Alias {n} diperbarui."),
-            Action::ForceMerge(n) => format!(
-                "Force merge {n} berjalan di latar (lihat GET /_tasks?actions=*forcemerge*)."
+            Action::Create { name, .. } => tf("Index {0} dibuat.", &[name]),
+            Action::Delete(n) => tf("Index {0} dihapus.", &[n]),
+            Action::Open(n) => tf("Index {0} dibuka.", &[n]),
+            Action::Close(n) => tf("Index {0} ditutup.", &[n]),
+            Action::Refresh(n) => tf("Index {0} di-refresh.", &[n]),
+            Action::Flush(n) => tf("Index {0} di-flush.", &[n]),
+            Action::ClearCache(n) => tf("Cache index {0} dibersihkan.", &[n]),
+            Action::UpdateSettings(n, _) => tf("Settings {0} diperbarui.", &[n]),
+            Action::AddField(n, _) => tf("Field baru ditambahkan ke mapping {0}.", &[n]),
+            Action::IlmRetry(n) => tf("ILM {0} dicoba ulang.", &[n]),
+            Action::Aliases(n, _) => tf("Alias {0} diperbarui.", &[n]),
+            Action::ForceMerge(n) => tf(
+                "Force merge {0} berjalan di latar (lihat GET /_tasks?actions=*forcemerge*).",
+                &[n],
             ),
-            Action::Rollover(t) => format!("Rollover {t} selesai."),
-            Action::Reindex { source, dest, .. } => format!("Reindex {source} → {dest} dimulai."),
+            Action::Rollover(target) => tf("Rollover {0} selesai.", &[target]),
+            Action::Reindex { source, dest, .. } => {
+                tf("Reindex {0} → {1} dimulai.", &[source, dest])
+            }
             Action::ByQuery {
                 index,
                 delete: true,
                 ..
-            } => format!("Delete by query di {index} dimulai."),
-            Action::ByQuery { index, .. } => format!("Update by query di {index} dimulai."),
-            Action::StaticSettings(n, _) => {
-                format!("Setting statis {n} diperbarui dan index dibuka kembali.")
-            }
+            } => tf("Delete by query di {0} dimulai.", &[index]),
+            Action::ByQuery { index, .. } => tf("Update by query di {0} dimulai.", &[index]),
+            Action::StaticSettings(n, _) => tf(
+                "Setting statis {0} diperbarui dan index dibuka kembali.",
+                &[n],
+            ),
             Action::Resize {
                 op, source, target, ..
-            } => format!(
-                "{} {source} → {target} dibuat. {source} masih diblok tulis; buka blok setelah {target} green.",
-                op.trim_start_matches('_')
+            } => tf(
+                "{0} {1} → {2} dibuat. {1} masih diblok tulis; buka blok setelah {2} green.",
+                &[&op.trim_start_matches('_'), source, target],
             ),
         }
     }
@@ -539,13 +544,13 @@ impl Indices {
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.filter)
-                    .hint_text("Cari index…")
+                    .hint_text(t("Cari index…"))
                     .desired_width(240.0),
             );
-            ui.checkbox(&mut self.show_hidden, "Tampilkan index sistem (.)");
+            ui.checkbox(&mut self.show_hidden, t("Tampilkan index sistem (.)"));
             ui.label("Health:");
             for (value, label) in [
-                (None, "semua"),
+                (None, t("semua")),
                 (Some("green"), "green"),
                 (Some("yellow"), "yellow"),
                 (Some("red"), "red"),
@@ -554,10 +559,10 @@ impl Indices {
             }
             if self.pending.is_some() {
                 ui.spinner();
-            } else if ui.button("⟳ Muat ulang").clicked() {
+            } else if ui.button(t("⟳ Muat ulang")).clicked() {
                 self.loaded = None;
             }
-            if !cx.conn.read_only && ui.button("+ Buat index").clicked() {
+            if !cx.conn.read_only && ui.button(t("+ Buat index")).clicked() {
                 self.create = Some(CreateForm {
                     name: String::new(),
                     shards: 1,
@@ -567,7 +572,7 @@ impl Indices {
             }
             if self.action_pending.is_some() {
                 ui.spinner();
-                ui.weak("Menjalankan aksi…");
+                ui.weak(t("Menjalankan aksi…"));
             }
         });
         if let Some(err) = &self.error {
@@ -584,7 +589,7 @@ impl Indices {
             && let Some(action) = &self.last_action
             && ui
                 .small_button("Inspect")
-                .on_hover_text(format!("Buka di Dev Tools:\n{}", action.describe()))
+                .on_hover_text(tf("Buka di Dev Tools:\n{0}", &[&action.describe()]))
                 .clicked()
         {
             let (method, path, body) = action.request();
@@ -609,10 +614,9 @@ impl Indices {
 
     fn table(&mut self, ui: &mut egui::Ui, cx: &mut Ctx) {
         let rows: Vec<Row> = self.visible_rows().into_iter().cloned().collect();
-        ui.weak(format!(
-            "{} index ditampilkan dari {}",
-            rows.len(),
-            self.rows.len()
+        ui.weak(tf(
+            "{0} index ditampilkan dari {1}",
+            &[&rows.len(), &self.rows.len()],
         ));
         let mut clicked = None;
         let mut sort_click = None;
@@ -652,16 +656,16 @@ impl Indices {
             .column(Column::remainder().clip(true))
             .header(22.0, |mut h| {
                 h.col(|_| {});
-                h.col(|ui| header(ui, "Nama", Col::Name, &mut sort_click));
+                h.col(|ui| header(ui, t("Nama"), Col::Name, &mut sort_click));
                 h.col(|ui| header(ui, "Health", Col::Health, &mut sort_click));
                 h.col(|ui| header(ui, "Status", Col::Status, &mut sort_click));
                 h.col(|ui| header(ui, "Pri", Col::Pri, &mut sort_click));
                 h.col(|ui| header(ui, "Rep", Col::Rep, &mut sort_click));
-                h.col(|ui| header(ui, "Dokumen", Col::Docs, &mut sort_click));
-                h.col(|ui| header(ui, "Ukuran", Col::Size, &mut sort_click));
-                h.col(|ui| header(ui, "Dibuat", Col::Created, &mut sort_click));
+                h.col(|ui| header(ui, docs_header(), Col::Docs, &mut sort_click));
+                h.col(|ui| header(ui, t("Ukuran"), Col::Size, &mut sort_click));
+                h.col(|ui| header(ui, t("Dibuat"), Col::Created, &mut sort_click));
                 h.col(|ui| {
-                    ui.strong("Alias / data stream");
+                    ui.strong(t("Alias / data stream"));
                 });
             })
             .body(|body| {
@@ -778,12 +782,12 @@ impl Indices {
         let closed = row.as_ref().is_some_and(|r| r.status == "close");
         let busy = self.action_pending.is_some();
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Buka di Discover").clicked() {
+            if ui.button(t("Buka di Discover")).clicked() {
                 *cx.nav = Some(Nav::Discover {
                     pattern: name.to_owned(),
                 });
             }
-            if ui.button("Buka di Dev Tools").clicked() {
+            if ui.button(t("Buka di Dev Tools")).clicked() {
                 *cx.nav = Some(Nav::Console {
                     method: "GET".into(),
                     path: format!("/{name}/_settings"),
@@ -791,7 +795,7 @@ impl Indices {
                 });
             }
             if cx.conn.read_only {
-                ui.weak("Profile read-only: aksi disembunyikan.");
+                ui.weak(t("Profile read-only: aksi disembunyikan."));
                 return;
             }
             ui.add_enabled_ui(!busy, |ui| {
@@ -807,7 +811,7 @@ impl Indices {
                     }
                 }
                 if system {
-                    ui.weak("Index sistem: aksi destruktif dikunci.");
+                    ui.weak(t("Index sistem: aksi destruktif dikunci."));
                     return;
                 }
                 if closed {
@@ -831,7 +835,7 @@ impl Indices {
                 if !closed
                     && ui
                         .button("By query…")
-                        .on_hover_text("Hapus atau update dokumen yang cocok query")
+                        .on_hover_text(t("Hapus atau update dokumen yang cocok query"))
                         .clicked()
                 {
                     self.by_query = Some(ByQueryForm {
@@ -846,7 +850,7 @@ impl Indices {
                 if !closed
                     && ui
                         .button("Reindex…")
-                        .on_hover_text("Salin dokumen ke index lain (async + progress)")
+                        .on_hover_text(t("Salin dokumen ke index lain (async + progress)"))
                         .clicked()
                 {
                     self.reindex_form =
@@ -869,15 +873,16 @@ impl Indices {
                     self.confirm = Some(Action::Rollover(ds));
                     self.confirm_typed.clear();
                 }
-                let delete = egui::Button::new(RichText::new("Hapus").color(egui::Color32::WHITE))
-                    .fill(egui::Color32::from_rgb(0xc0, 0x39, 0x2b));
+                let delete =
+                    egui::Button::new(RichText::new(t("Hapus")).color(egui::Color32::WHITE))
+                        .fill(egui::Color32::from_rgb(0xc0, 0x39, 0x2b));
                 let delete_missing = privs.missing(&Action::Delete(name.into()));
                 if ui
                     .add_enabled(delete_missing.is_none(), delete)
                     .on_hover_text(Action::Delete(name.into()).describe())
-                    .on_disabled_hover_text(format!(
-                        "User tidak punya privilege `{}` pada index ini.",
-                        delete_missing.unwrap_or_default()
+                    .on_disabled_hover_text(tf(
+                        "User tidak punya privilege `{0}` pada index ini.",
+                        &[&delete_missing.unwrap_or_default()],
                     ))
                     .clicked()
                 {
@@ -892,7 +897,7 @@ impl Indices {
             ui.selectable_value(&mut self.tab, Tab::Settings, "Settings");
             ui.selectable_value(&mut self.tab, Tab::Mappings, "Mappings");
             ui.selectable_value(&mut self.tab, Tab::Aliases, "Alias");
-            ui.selectable_value(&mut self.tab, Tab::Docs, "Dokumen");
+            ui.selectable_value(&mut self.tab, Tab::Docs, documents_label());
             // PRF-11: shard & ILM tidak tersedia di serverless.
             if cx.caps.cluster_ops() {
                 ui.selectable_value(&mut self.tab, Tab::Shards, "Shards");
@@ -936,10 +941,10 @@ impl Indices {
                         action = settings_editor(ui, name, form);
                         if !system
                             && ui
-                                .button("Ubah setting statis…")
-                                .on_hover_text(
+                                .button(t("Ubah setting statis…"))
+                                .on_hover_text(t(
                                     "Butuh close → update → open (index tidak tersedia sesaat)",
-                                )
+                                ))
                                 .clicked()
                         {
                             self.static_form =
@@ -949,16 +954,16 @@ impl Indices {
                     }
                     // IDX-11: tabel/JSON + muat default.
                     ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.settings_json, false, "Tabel");
+                        ui.selectable_value(&mut self.settings_json, false, t("Tabel"));
                         ui.selectable_value(&mut self.settings_json, true, "JSON");
                         ui.separator();
                         if ui
-                            .checkbox(&mut self.show_defaults, "Tampilkan default")
+                            .checkbox(&mut self.show_defaults, t("Tampilkan default"))
                             .changed()
                         {
                             reload_settings = true;
                         }
-                        if self.settings_json && ui.button("Salin").clicked() {
+                        if self.settings_json && ui.button(t("Salin")).clicked() {
                             ui.ctx().copy_text(pretty(&detail.settings_raw));
                         }
                     });
@@ -988,14 +993,16 @@ impl Indices {
                 Tab::Mappings => {
                     if !cx.conn.read_only && !closed {
                         action = add_field_form(ui, name, &mut self.new_field);
-                        ui.weak("Mengubah tipe field yang sudah ada butuh reindex ke index baru.");
+                        ui.weak(t(
+                            "Mengubah tipe field yang sudah ada butuh reindex ke index baru.",
+                        ));
                         ui.separator();
                     }
                     // IDX-13: tree/JSON.
                     ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.mappings_json, false, "Tree");
                         ui.selectable_value(&mut self.mappings_json, true, "JSON");
-                        if self.mappings_json && ui.button("Salin").clicked() {
+                        if self.mappings_json && ui.button(t("Salin")).clicked() {
                             ui.ctx().copy_text(pretty(&detail.mappings));
                         }
                     });
@@ -1029,7 +1036,7 @@ impl Indices {
                     match &self.docs {
                         Some((n, Ok(hits))) if n == name => {
                             if hits.is_empty() {
-                                ui.weak("Index kosong.");
+                                ui.weak(t("Index kosong."));
                             }
                             for hit in hits {
                                 let id = hit["_id"].as_str().unwrap_or_default();
@@ -1084,7 +1091,7 @@ impl Indices {
 
     /// Tab Shards (IDX-15) dan ILM (IDX-16).
     fn tab_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, cx: &mut Ctx, name: &str) {
-        let reload = ui.button("⟳ Muat ulang").clicked();
+        let reload = ui.button(t("⟳ Muat ulang")).clicked();
         if self.tab == Tab::Shards {
             let stale = self.shards.as_ref().is_none_or(|(n, _)| n != name);
             if (stale || reload) && self.shards_pending.is_none() {
@@ -1139,14 +1146,14 @@ impl Indices {
                     .num_columns(7)
                     .show(ui, |ui| {
                         for h in ["Shard", "Tipe", "State", "Dokumen", "Ukuran", "Node", ""] {
-                            ui.strong(h);
+                            ui.strong(if h == "Dokumen" { docs_header() } else { t(h) });
                         }
                         ui.end_row();
                         for r in &rows {
                             let state = r["state"].as_str().unwrap_or("-");
                             let primary = r["prirep"] == "p";
                             ui.label(r["shard"].as_str().unwrap_or("-"));
-                            ui.label(if primary { "primer" } else { "replika" });
+                            ui.label(if primary { t("primer") } else { t("replika") });
                             let color = match state {
                                 "STARTED" => egui::Color32::from_rgb(0x2e, 0xa0, 0x43),
                                 "UNASSIGNED" => egui::Color32::from_rgb(0xd0, 0x3b, 0x3b),
@@ -1154,7 +1161,7 @@ impl Indices {
                             };
                             let state_label = ui.label(RichText::new(state).color(color));
                             if let Some(reason) = r["unassigned.reason"].as_str() {
-                                state_label.on_hover_text(format!("Alasan: {reason}"));
+                                state_label.on_hover_text(tf("Alasan: {0}", &[&reason]));
                             }
                             ui.label(widgets::format_count(num(&r["docs"])));
                             ui.label(widgets::format_bytes(num(&r["store"]) as f64));
@@ -1187,7 +1194,7 @@ impl Indices {
                             ui.label(text);
                         }
                         if let Some(reason) = v["unassigned_info"]["reason"].as_str() {
-                            ui.weak(format!("Alasan unassigned: {reason}"));
+                            ui.weak(tf("Alasan unassigned: {0}", &[&reason]));
                         }
                         for node in v["node_allocation_decisions"]
                             .as_array()
@@ -1219,7 +1226,7 @@ impl Indices {
                                 ui.add(egui::Label::new(d).wrap());
                             }
                         }
-                        egui::CollapsingHeader::new("Response lengkap").show(ui, |ui| {
+                        egui::CollapsingHeader::new(t("Response lengkap")).show(ui, |ui| {
                             widgets::json_tree(ui, v, egui::Id::unique("explain_tree"));
                         });
                     }
@@ -1242,7 +1249,7 @@ impl Indices {
             }
         };
         if v["managed"] != json!(true) {
-            ui.weak("Index ini tidak dikelola ILM.");
+            ui.weak(t("Index ini tidak dikelola ILM."));
             return;
         }
         egui::Grid::new("ilm_grid")
@@ -1256,7 +1263,7 @@ impl Indices {
                     ("Step", "step"),
                     ("Umur", "age"),
                 ] {
-                    ui.label(label);
+                    ui.label(t(label));
                     ui.label(v[key].as_str().unwrap_or("-"));
                     ui.end_row();
                 }
@@ -1272,11 +1279,11 @@ impl Indices {
                 ),
             );
             let action = Action::IlmRetry(name.into());
-            if !cx.conn.read_only && action_button(ui, self.privs, "Coba ulang ILM", &action) {
+            if !cx.conn.read_only && action_button(ui, self.privs, t("Coba ulang ILM"), &action) {
                 self.run(ui.ctx(), cx.conn, action);
             }
         }
-        egui::CollapsingHeader::new("Response lengkap").show(ui, |ui| {
+        egui::CollapsingHeader::new(t("Response lengkap")).show(ui, |ui| {
             widgets::json_tree(ui, &v, egui::Id::unique("ilm_tree"));
         });
     }
@@ -1296,9 +1303,9 @@ impl Indices {
             if let (Action::StaticSettings(n, _), Err(e)) = (&action, &result) {
                 let reopened = conn.json("POST", &format!("/{n}/_open"), None);
                 let note = if reopened.is_ok() {
-                    "index sudah dibuka kembali"
+                    t("index sudah dibuka kembali")
                 } else {
-                    "GAGAL membuka kembali index, buka manual"
+                    t("GAGAL membuka kembali index, buka manual")
                 };
                 result = Err(format!("{e}\n({note})"));
             }
@@ -1314,21 +1321,21 @@ impl Indices {
         let mut close = false;
         egui::Modal::new(egui::Id::unique("static_settings")).show(ctx, |ui| {
             ui.set_width(480.0);
-            ui.heading(format!("Setting statis · {index}"));
-            widgets::warn_box(ui, "Index akan ditutup sesaat (tidak bisa dicari/ditulis), diubah, lalu dibuka kembali.");
+            ui.heading(tf("Setting statis · {0}", &[&index]));
+            widgets::warn_box(ui, t("Index akan ditutup sesaat (tidak bisa dicari/ditulis), diubah, lalu dibuka kembali."));
             egui::Grid::new("static_grid").num_columns(2).show(ui, |ui| {
-                ui.label("Setting");
+                ui.label(t("Setting"));
                 ui.add(egui::TextEdit::singleline(key).hint_text("index.codec"));
                 ui.end_row();
-                ui.label("Nilai (JSON)");
+                ui.label(t("Nilai (JSON)"));
                 ui.add(egui::TextEdit::singleline(value).hint_text("\"best_compression\""));
                 ui.end_row();
             });
-            ui.weak("Nilai berupa JSON: string pakai kutip, angka/boolean/objek apa adanya (mis. analysis).");
-            let parsed: Result<Value, String> = serde_json::from_str(value).map_err(|e| format!("Nilai bukan JSON: {e}"));
+            ui.weak(t("Nilai berupa JSON: string pakai kutip, angka/boolean/objek apa adanya (mis. analysis)."));
+            let parsed: Result<Value, String> = serde_json::from_str(value).map_err(|e| tf("Nilai bukan JSON: {0}", &[&e]));
             let key_ok = key.trim().starts_with("index.") || key.trim().starts_with("analysis");
             if !key_ok {
-                ui.colored_label(ui.visuals().error_fg_color, "Nama setting diawali index. atau analysis");
+                ui.colored_label(ui.visuals().error_fg_color, t("Nama setting diawali index. atau analysis"));
             }
             if let Err(e) = &parsed {
                 ui.colored_label(ui.visuals().error_fg_color, e);
@@ -1340,10 +1347,10 @@ impl Indices {
             });
             ui.horizontal(|ui| {
                 let hover = action.as_ref().map(Action::describe).unwrap_or_default();
-                if ui.add_enabled(action.is_some(), egui::Button::new("Terapkan")).on_hover_text(hover).clicked() {
+                if ui.add_enabled(action.is_some(), egui::Button::new(t("Terapkan"))).on_hover_text(hover).clicked() {
                     submit = action;
                 }
-                if ui.button("Batal").clicked() {
+                if ui.button(t("Batal")).clicked() {
                     close = true;
                 }
             });
@@ -1367,26 +1374,26 @@ impl Indices {
         let mut close = false;
         egui::Modal::new(egui::Id::unique("resize_index")).show(ctx, |ui| {
             ui.set_width(480.0);
-            ui.heading(format!("Clone / Shrink / Split · {source}"));
+            ui.heading(tf("Clone / Shrink / Split · {0}", &[&source]));
             ui.horizontal(|ui| {
                 ui.selectable_value(op, "_clone", "Clone");
                 ui.selectable_value(op, "_shrink", "Shrink");
                 ui.selectable_value(op, "_split", "Split");
             });
             egui::Grid::new("resize_grid").num_columns(2).show(ui, |ui| {
-                ui.label("Index tujuan");
+                ui.label(t("Index tujuan"));
                 ui.text_edit_singleline(target);
                 ui.end_row();
                 if *op != "_clone" {
-                    ui.label("Shard primer");
+                    ui.label(t("Shard primer"));
                     ui.add(egui::DragValue::new(shards).range(1..=1024));
                     ui.end_row();
                 }
             });
-            ui.weak(format!("Shard primer sumber: {pri}. {source} akan diblok tulis (index.blocks.write) sebelum operasi."));
+            ui.weak(tf("Shard primer sumber: {0}. {1} akan diblok tulis (index.blocks.write) sebelum operasi.", &[&pri, &source]));
             let shard_err = resize_shard_error(op, u64::from(*shards), *pri);
             if *op == "_shrink" {
-                ui.weak("Shrink butuh satu salinan setiap shard di satu node yang sama (otomatis di cluster single-node).");
+                ui.weak(t("Shrink butuh satu salinan setiap shard di satu node yang sama (otomatis di cluster single-node)."));
             }
             let name_err = validate_index_name(target.trim()).err();
             for err in [&shard_err, &name_err].into_iter().flatten() {
@@ -1400,10 +1407,10 @@ impl Indices {
             };
             ui.horizontal(|ui| {
                 let ok = shard_err.is_none() && name_err.is_none();
-                if ui.add_enabled(ok, egui::Button::new("Jalankan")).on_hover_text(action.describe()).clicked() {
+                if ui.add_enabled(ok, egui::Button::new(t("Jalankan"))).on_hover_text(action.describe()).clicked() {
                     submit = Some(action);
                 }
-                if ui.button("Batal").clicked() {
+                if ui.button(t("Batal")).clicked() {
                     close = true;
                 }
             });
@@ -1462,7 +1469,7 @@ impl Indices {
                 } else {
                     0.0
                 };
-                ui.label(RichText::new(format!("{} task {id}", self.task_label)).strong());
+                ui.label(RichText::new(tf("{0} task {1}", &[&self.task_label, &id])).strong());
                 ui.add(
                     egui::ProgressBar::new(if done { 1.0 } else { pct })
                         .desired_width(240.0)
@@ -1481,15 +1488,15 @@ impl Indices {
                     if failures > 0 {
                         ui.colored_label(
                             ui.visuals().error_fg_color,
-                            format!("selesai, {failures} gagal"),
+                            tf("selesai, {0} gagal", &[&failures]),
                         );
                     } else {
-                        ui.label("selesai");
+                        ui.label(t("selesai"));
                     }
-                    close = ui.small_button("Tutup").clicked();
+                    close = ui.small_button(t("Tutup")).clicked();
                 } else {
                     ui.spinner();
-                    cancel = !cx.conn.read_only && ui.small_button("Batalkan").clicked();
+                    cancel = !cx.conn.read_only && ui.small_button(t("Batalkan")).clicked();
                 }
             });
             if let Some(Err(err)) = status {
@@ -1516,7 +1523,7 @@ impl Indices {
         let names = self.checked.iter().cloned().collect::<Vec<_>>().join(",");
         let privs = Privs::default();
         ui.horizontal(|ui| {
-            ui.strong(format!("{} dipilih:", self.checked.len()));
+            ui.strong(tf("{0} dipilih:", &[&self.checked.len()]));
             for (label, action) in [
                 ("Refresh", Action::Refresh(names.clone())),
                 ("Flush", Action::Flush(names.clone())),
@@ -1531,12 +1538,12 @@ impl Indices {
                 ("Close", Action::Close(names.clone())),
                 ("Hapus", Action::Delete(names.clone())),
             ] {
-                if action_button(ui, privs, label, &action) {
+                if action_button(ui, privs, t(label), &action) {
                     self.confirm = Some(action);
                     self.confirm_typed.clear();
                 }
             }
-            if ui.small_button("Batal pilih").clicked() {
+            if ui.small_button(t("Batal pilih")).clicked() {
                 self.checked.clear();
             }
         });
@@ -1552,14 +1559,14 @@ impl Indices {
                 ui.set_width(460.0);
                 ui.heading("Reindex");
                 egui::Grid::new("reindex_grid").num_columns(2).show(ui, |ui| {
-                    ui.label("Sumber");
+                    ui.label(t("Sumber"));
                     ui.text_edit_singleline(source);
                     ui.end_row();
-                    ui.label("Tujuan");
+                    ui.label(t("Tujuan"));
                     ui.text_edit_singleline(dest);
                     ui.end_row();
                     ui.label("Query (KQL)");
-                    ui.add(egui::TextEdit::singleline(kql).hint_text("opsional, mis. status:active"));
+                    ui.add(egui::TextEdit::singleline(kql).hint_text(t("opsional, mis. status:active")));
                     ui.end_row();
                 });
                 let query = crate::es::kql::to_dsl(kql);
@@ -1568,9 +1575,9 @@ impl Indices {
                     ui.colored_label(ui.visuals().error_fg_color, err);
                 }
                 if dest.trim() == source.trim() {
-                    ui.colored_label(ui.visuals().error_fg_color, "Tujuan harus berbeda dari sumber.");
+                    ui.colored_label(ui.visuals().error_fg_color, t("Tujuan harus berbeda dari sumber."));
                 }
-                ui.weak("Index tujuan dibuat otomatis jika belum ada (mapping dinamis). Buat dulu dengan mapping yang benar bila perlu.");
+                ui.weak(t("Index tujuan dibuat otomatis jika belum ada (mapping dinamis). Buat dulu dengan mapping yang benar bila perlu."));
                 ui.horizontal(|ui| {
                     let ok = valid.is_ok() && dest.trim() != source.trim();
                     let action = query.ok().map(|q| Action::Reindex {
@@ -1579,10 +1586,10 @@ impl Indices {
                         query: q,
                     });
                     let hover = action.as_ref().map(Action::describe).unwrap_or_default();
-                    if ui.add_enabled(ok, egui::Button::new("Mulai reindex")).on_hover_text(hover).clicked() {
+                    if ui.add_enabled(ok, egui::Button::new(t("Mulai reindex"))).on_hover_text(hover).clicked() {
                         start = action;
                     }
-                    if ui.button("Batal").clicked() {
+                    if ui.button(t("Batal")).clicked() {
                         cancel_form = true;
                     }
                 });
@@ -1599,17 +1606,17 @@ impl Indices {
         if let Some(form) = &mut self.by_query {
             egui::Modal::new(egui::Id::unique("by_query_form")).show(ctx, |ui| {
                 ui.set_width(520.0);
-                ui.heading(format!("By query · {}", form.index));
+                ui.heading(tf("By query · {0}", &[&form.index]));
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut form.delete, true, "Hapus dokumen");
-                    ui.selectable_value(&mut form.delete, false, "Update dokumen");
+                    ui.selectable_value(&mut form.delete, true, t("Hapus dokumen"));
+                    ui.selectable_value(&mut form.delete, false, t("Update dokumen"));
                 });
-                ui.label("Query (KQL; kosong = semua dokumen)");
+                ui.label(t("Query (KQL; kosong = semua dokumen)"));
                 if ui.add(egui::TextEdit::singleline(&mut form.kql).desired_width(f32::INFINITY)).changed() {
                     form.count = None;
                 }
                 if !form.delete {
-                    ui.label("Script Painless (opsional, mis. ctx._source.status = 'arsip')");
+                    ui.label(t("Script Painless (opsional, mis. ctx._source.status = 'arsip')"));
                     ui.add(egui::TextEdit::multiline(&mut form.script).code_editor().desired_rows(4).desired_width(f32::INFINITY));
                 }
                 let query = crate::es::kql::to_dsl(&form.kql);
@@ -1617,14 +1624,14 @@ impl Indices {
                     ui.colored_label(ui.visuals().error_fg_color, err);
                 }
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(query.is_ok(), egui::Button::new("Hitung dokumen")).clicked()
+                    if ui.add_enabled(query.is_ok(), egui::Button::new(t("Hitung dokumen"))).clicked()
                         && let Ok(q) = &query
                     {
                         count_request = Some((form.index.clone(), q.clone()));
                     }
                     match &form.count {
                         Some(Ok(n)) => {
-                            ui.strong(format!("{} dokumen cocok", widgets::format_count(*n)));
+                            ui.strong(tf("{0} dokumen cocok", &[&widgets::format_count(*n)]));
                         }
                         Some(Err(e)) => {
                             ui.colored_label(ui.visuals().error_fg_color, e);
@@ -1634,10 +1641,10 @@ impl Indices {
                 });
                 // Hapus massal wajib dihitung dulu dan dikonfirmasi dengan mengetik HAPUS.
                 if form.delete {
-                    ui.label("Ketik HAPUS untuk konfirmasi:");
+                    ui.label(t("Ketik HAPUS untuk konfirmasi:"));
                     ui.text_edit_singleline(&mut form.typed);
                 }
-                ui.weak("Berjalan async dengan conflicts=proceed; progress tampil di atas daftar index.");
+                ui.weak(t("Berjalan async dengan conflicts=proceed; progress tampil di atas daftar index."));
                 ui.horizontal(|ui| {
                     let action = query.clone().ok().map(|q| Action::ByQuery {
                         index: form.index.clone(),
@@ -1648,10 +1655,10 @@ impl Indices {
                     let counted = matches!(form.count, Some(Ok(_)));
                     let ok = action.is_some() && (!form.delete || (counted && form.typed.trim() == "HAPUS"));
                     let hover = action.as_ref().map(Action::describe).unwrap_or_default();
-                    if ui.add_enabled(ok, egui::Button::new("Jalankan")).on_hover_text(hover).clicked() {
+                    if ui.add_enabled(ok, egui::Button::new(t("Jalankan"))).on_hover_text(hover).clicked() {
                         by_query_start = action;
                     }
-                    if ui.button("Batal").clicked() {
+                    if ui.button(t("Batal")).clicked() {
                         by_query_close = true;
                     }
                 });
@@ -1686,43 +1693,54 @@ impl Indices {
             let prod = cx.profile.is_prod();
             let (title, message, expected) = match &action {
                 Action::Delete(n) => (
-                    "Hapus index?",
-                    format!(
-                        "Index {n} dan semua dokumennya akan dihapus permanen. Aksi ini tidak bisa dibatalkan."
+                    t("Hapus index?"),
+                    tf(
+                        "Index {0} dan semua dokumennya akan dihapus permanen. Aksi ini tidak bisa dibatalkan.",
+                        &[n],
                     ),
                     Some(if n.contains(',') { "HAPUS" } else { n.as_str() }),
                 ),
                 Action::StaticSettings(n, _) => (
-                    "Ubah setting statis?",
-                    format!(
-                        "{n} akan ditutup, diubah, lalu dibuka kembali (sementara tidak tersedia)."
+                    t("Ubah setting statis?"),
+                    tf(
+                        "{0} akan ditutup, diubah, lalu dibuka kembali (sementara tidak tersedia).",
+                        &[n],
                     ),
                     Some(n.as_str()),
                 ),
                 Action::Resize { source, target, .. } => (
-                    "Clone/Shrink/Split?",
-                    format!("{source} akan diblok tulis, lalu {target} dibuat dari {source}."),
+                    t("Clone/Shrink/Split?"),
+                    tf(
+                        "{0} akan diblok tulis, lalu {1} dibuat dari {0}.",
+                        &[source, target],
+                    ),
                     None,
                 ),
                 Action::ForceMerge(n) => (
                     "Force merge?",
-                    format!(
-                        "Force merge {n} ke 1 segment memakan I/O dan CPU besar. \
-                         Jangan jalankan pada index yang masih aktif ditulisi."
+                    tf(
+                        "Force merge {0} ke 1 segment memakan I/O dan CPU besar. Jangan jalankan pada index yang masih aktif ditulisi.",
+                        &[n],
                     ),
                     None,
                 ),
-                Action::Rollover(t) => (
-                    "Rollover?",
-                    format!("{t} akan menulis ke backing index baru mulai sekarang."),
+                Action::Rollover(target) => (
+                    t("Rollover?"),
+                    tf(
+                        "{0} akan menulis ke backing index baru mulai sekarang.",
+                        &[target],
+                    ),
                     None,
                 ),
                 Action::Close(n) => (
-                    "Tutup index?",
-                    format!("Index {n} tidak bisa dicari atau ditulisi sampai dibuka kembali."),
+                    t("Tutup index?"),
+                    tf(
+                        "Index {0} tidak bisa dicari atau ditulisi sampai dibuka kembali.",
+                        &[n],
+                    ),
                     prod.then_some(n.as_str()),
                 ),
-                _ => ("Lanjutkan?", String::new(), None),
+                _ => (t("Lanjutkan?"), String::new(), None),
             };
             let message = format!("{message}\n\nRequest:\n{}", action.describe());
             match widgets::confirm_dialog(
@@ -1746,21 +1764,21 @@ impl Indices {
         if let Some(form) = &mut self.create {
             egui::Modal::new(egui::Id::unique("create_index")).show(ctx, |ui| {
                 ui.set_width(480.0);
-                ui.heading("Buat index");
+                ui.heading(t("Buat index"));
                 egui::Grid::new("create_form")
                     .num_columns(2)
                     .show(ui, |ui| {
-                        ui.label("Nama");
+                        ui.label(t("Nama"));
                         ui.text_edit_singleline(&mut form.name);
                         ui.end_row();
-                        ui.label("Shard primer");
+                        ui.label(t("Shard primer"));
                         ui.add(egui::DragValue::new(&mut form.shards).range(1..=1024));
                         ui.end_row();
-                        ui.label("Replika");
+                        ui.label(t("Replika"));
                         ui.add(egui::DragValue::new(&mut form.replicas).range(0..=16));
                         ui.end_row();
                     });
-                ui.label("Mappings (JSON, opsional)");
+                ui.label(t("Mappings (JSON, opsional)"));
                 ui.add(
                     egui::TextEdit::multiline(&mut form.mappings)
                         .code_editor()
@@ -1775,7 +1793,7 @@ impl Indices {
                 }
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(validation.is_ok(), egui::Button::new("Buat"))
+                        .add_enabled(validation.is_ok(), egui::Button::new(t("Buat")))
                         .clicked()
                         && let Ok(body) = validation
                     {
@@ -1784,7 +1802,7 @@ impl Indices {
                             body,
                         });
                     }
-                    if ui.button("Batal").clicked() {
+                    if ui.button(t("Batal")).clicked() {
                         cancel = true;
                     }
                 });
@@ -1812,7 +1830,7 @@ fn aliases_ui(
     let mut action = None;
     let aliases = row.map(|r| r.aliases.clone()).unwrap_or_default();
     if aliases.is_empty() {
-        ui.weak("Index ini belum punya alias.");
+        ui.weak(t("Index ini belum punya alias."));
     }
     for alias in &aliases {
         ui.horizontal(|ui| {
@@ -1821,7 +1839,7 @@ fn aliases_ui(
                 name.into(),
                 json!({"actions": [{"remove": {"index": name, "alias": alias}}]}),
             );
-            if !read_only && action_button(ui, privs, "Hapus", &remove) {
+            if !read_only && action_button(ui, privs, t("Hapus"), &remove) {
                 action = Some(remove);
             }
         });
@@ -1831,7 +1849,7 @@ fn aliases_ui(
     }
     ui.separator();
     ui.horizontal(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut input.0).hint_text("nama alias").desired_width(180.0));
+        ui.add(egui::TextEdit::singleline(&mut input.0).hint_text(t("nama alias")).desired_width(180.0));
         ui.checkbox(&mut input.1, "write index");
         let alias = input.0.trim();
         let add = Action::Aliases(
@@ -1840,8 +1858,8 @@ fn aliases_ui(
         );
         let valid = validate_index_name(alias).is_ok();
         if ui
-            .add_enabled(valid, egui::Button::new("Tambah alias"))
-            .on_hover_text(format!("Request:\n{}", add.describe()))
+            .add_enabled(valid, egui::Button::new(t("Tambah alias")))
+            .on_hover_text(tf("Request:\n{0}", &[&add.describe()]))
             .clicked()
         {
             action = Some(add);
@@ -1856,12 +1874,13 @@ fn action_button(ui: &mut egui::Ui, privs: Privs, label: &str, action: &Action) 
     match privs.missing(action) {
         None => ui
             .button(label)
-            .on_hover_text(format!("Request:\n{}", action.describe()))
+            .on_hover_text(tf("Request:\n{0}", &[&action.describe()]))
             .clicked(),
         Some(need) => {
             ui.add_enabled(false, egui::Button::new(label))
-                .on_disabled_hover_text(format!(
-                    "User tidak punya privilege `{need}` pada index ini."
+                .on_disabled_hover_text(tf(
+                    "User tidak punya privilege `{0}` pada index ini.",
+                    &[&need],
                 ));
             false
         }
@@ -1873,7 +1892,7 @@ fn create_body(form: &CreateForm) -> Result<Value, String> {
         json!({"settings": {"number_of_shards": form.shards, "number_of_replicas": form.replicas}});
     if !form.mappings.trim().is_empty() {
         let mappings: Value = serde_json::from_str(&form.mappings)
-            .map_err(|e| format!("Mappings tidak valid: {e}"))?;
+            .map_err(|e| tf("Mappings tidak valid: {0}", &[&e]))?;
         body["mappings"] = mappings;
     }
     Ok(body)
@@ -1881,7 +1900,7 @@ fn create_body(form: &CreateForm) -> Result<Value, String> {
 
 fn overview(ui: &mut egui::Ui, row: Option<&Row>, detail: &Detail) {
     let p = &detail.stats["primaries"];
-    let t = &detail.stats["total"];
+    let tot = &detail.stats["total"];
     let n = |v: &Value| widgets::format_count(v.as_u64().unwrap_or(0));
     egui::Grid::new("overview_grid")
         .striped(true)
@@ -1891,10 +1910,13 @@ fn overview(ui: &mut egui::Ui, row: Option<&Row>, detail: &Detail) {
                 for (k, v) in [
                     ("Health", r.health.clone()),
                     ("Status", r.status.clone()),
-                    ("Shard primer / replika", format!("{} / {}", r.pri, r.rep)),
-                    ("Dokumen", widgets::format_count(r.docs)),
-                    ("Dokumen terhapus", widgets::format_count(r.deleted)),
-                    ("Ukuran total", widgets::format_bytes(r.size)),
+                    (
+                        t("Shard primer / replika"),
+                        format!("{} / {}", r.pri, r.rep),
+                    ),
+                    (documents_label(), widgets::format_count(r.docs)),
+                    (t("Dokumen terhapus"), widgets::format_count(r.deleted)),
+                    (t("Ukuran total"), widgets::format_bytes(r.size)),
                     (
                         "Alias",
                         if r.aliases.is_empty() {
@@ -1915,13 +1937,13 @@ fn overview(ui: &mut egui::Ui, row: Option<&Row>, detail: &Detail) {
             }
             for (k, v) in [
                 (
-                    "Ukuran primer",
+                    t("Ukuran primer"),
                     widgets::format_bytes(p["store"]["size_in_bytes"].as_f64().unwrap_or(0.0)),
                 ),
-                ("Total indexing", n(&t["indexing"]["index_total"])),
-                ("Total query", n(&t["search"]["query_total"])),
-                ("Segment", n(&t["segments"]["count"])),
-                ("Refresh total", n(&t["refresh"]["total"])),
+                ("Total indexing", n(&tot["indexing"]["index_total"])),
+                ("Total query", n(&tot["search"]["query_total"])),
+                ("Segment", n(&tot["segments"]["count"])),
+                ("Refresh total", n(&tot["refresh"]["total"])),
             ] {
                 ui.label(k);
                 ui.label(v);
@@ -1949,7 +1971,7 @@ fn settings_form(detail: &Detail) -> SettingsForm {
 }
 
 fn settings_editor(ui: &mut egui::Ui, name: &str, form: &mut SettingsForm) -> Option<Action> {
-    ui.label(RichText::new("Setting dinamis").strong());
+    ui.label(RichText::new(t("Setting dinamis")).strong());
     egui::Grid::new("settings_form")
         .num_columns(2)
         .show(ui, |ui| {
@@ -1959,12 +1981,13 @@ fn settings_editor(ui: &mut egui::Ui, name: &str, form: &mut SettingsForm) -> Op
             ui.label("refresh_interval");
             ui.add(
                 egui::TextEdit::singleline(&mut form.refresh_interval)
-                    .hint_text("default 1s, -1 = mati"),
+                    .hint_text(t("default 1s, -1 = mati")),
             );
             ui.end_row();
             ui.label("max_result_window");
             ui.add(
-                egui::TextEdit::singleline(&mut form.max_result_window).hint_text("default 10000"),
+                egui::TextEdit::singleline(&mut form.max_result_window)
+                    .hint_text(t("default 10000")),
             );
             ui.end_row();
             ui.label("blocks.write");
@@ -1981,7 +2004,7 @@ fn settings_editor(ui: &mut egui::Ui, name: &str, form: &mut SettingsForm) -> Op
             Ok(n) => {
                 index.insert("number_of_replicas".into(), json!(n));
             }
-            Err(_) => error = Some("number_of_replicas harus angka."),
+            Err(_) => error = Some(t("number_of_replicas harus angka.")),
         }
     }
     if !form.refresh_interval.trim().is_empty() {
@@ -1995,7 +2018,7 @@ fn settings_editor(ui: &mut egui::Ui, name: &str, form: &mut SettingsForm) -> Op
             Ok(n) => {
                 index.insert("max_result_window".into(), json!(n));
             }
-            Err(_) => error = Some("max_result_window harus angka."),
+            Err(_) => error = Some(t("max_result_window harus angka.")),
         }
     }
     index.insert("blocks.write".into(), json!(form.block_write));
@@ -2005,14 +2028,14 @@ fn settings_editor(ui: &mut egui::Ui, name: &str, form: &mut SettingsForm) -> Op
     }
     let action = Action::UpdateSettings(name.to_owned(), json!({"index": index}));
     let clicked = ui
-        .add_enabled(error.is_none(), egui::Button::new("Simpan settings"))
-        .on_hover_text(format!("Request:\n{}", action.describe()))
+        .add_enabled(error.is_none(), egui::Button::new(t("Simpan settings")))
+        .on_hover_text(tf("Request:\n{0}", &[&action.describe()]))
         .clicked();
     clicked.then_some(action)
 }
 
 fn add_field_form(ui: &mut egui::Ui, name: &str, field: &mut (String, String)) -> Option<Action> {
-    ui.label(RichText::new("Tambah field").strong());
+    ui.label(RichText::new(t("Tambah field")).strong());
     if field.1.is_empty() {
         field.1 = "keyword".into();
     }
@@ -2020,7 +2043,7 @@ fn add_field_form(ui: &mut egui::Ui, name: &str, field: &mut (String, String)) -
     ui.horizontal(|ui| {
         ui.add(
             egui::TextEdit::singleline(&mut field.0)
-                .hint_text("nama.field")
+                .hint_text(t("nama.field"))
                 .desired_width(200.0),
         );
         egui::ComboBox::from_id_salt("new_field_type")
@@ -2035,8 +2058,8 @@ fn add_field_form(ui: &mut egui::Ui, name: &str, field: &mut (String, String)) -
             json!({"properties": {field.0.trim(): {"type": field.1}}}),
         );
         add = ui
-            .add_enabled(!field.0.trim().is_empty(), egui::Button::new("Tambah"))
-            .on_hover_text(format!("Request:\n{}", action.describe()))
+            .add_enabled(!field.0.trim().is_empty(), egui::Button::new(t("Tambah")))
+            .on_hover_text(tf("Request:\n{0}", &[&action.describe()]))
             .clicked()
             .then_some(action);
     });
@@ -2203,11 +2226,13 @@ fn pretty(v: &Value) -> String {
 /// IDX-38: validasi jumlah shard untuk shrink/split.
 fn resize_shard_error(op: &str, n: u64, pri: u64) -> Option<String> {
     match op {
-        "_shrink" if n >= pri || n == 0 || !pri.is_multiple_of(n) => Some(format!(
-            "Shrink: jumlah shard harus faktor dari {pri} dan lebih kecil."
+        "_shrink" if n >= pri || n == 0 || !pri.is_multiple_of(n) => Some(tf(
+            "Shrink: jumlah shard harus faktor dari {0} dan lebih kecil.",
+            &[&pri],
         )),
-        "_split" if n <= pri || !n.is_multiple_of(pri.max(1)) => Some(format!(
-            "Split: jumlah shard harus kelipatan {pri} dan lebih besar."
+        "_split" if n <= pri || !n.is_multiple_of(pri.max(1)) => Some(tf(
+            "Split: jumlah shard harus kelipatan {0} dan lebih besar.",
+            &[&pri],
         )),
         _ => None,
     }
@@ -2216,29 +2241,312 @@ fn resize_shard_error(op: &str, n: u64, pri: u64) -> Option<String> {
 /// Aturan nama index Elasticsearch.
 pub fn validate_index_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
-        return Err("Nama index wajib diisi.".into());
+        return Err(t("Nama index wajib diisi.").into());
     }
     if name.len() > 255 {
-        return Err("Nama index maksimal 255 byte.".into());
+        return Err(t("Nama index maksimal 255 byte.").into());
     }
     if name != name.to_lowercase() {
-        return Err("Nama index harus huruf kecil.".into());
+        return Err(t("Nama index harus huruf kecil.").into());
     }
     if name.starts_with(['-', '_', '+']) {
-        return Err("Nama index tidak boleh diawali -, _, atau +.".into());
+        return Err(t("Nama index tidak boleh diawali -, _, atau +.").into());
     }
     if name == "." || name == ".." {
-        return Err("Nama index tidak boleh . atau ..".into());
+        return Err(t("Nama index tidak boleh . atau ..").into());
     }
     if let Some(c) = name.chars().find(|c| r#"\/*?"<>|, #:"#.contains(*c)) {
-        return Err(format!("Karakter '{c}' tidak diizinkan di nama index."));
+        return Err(tf("Karakter '{0}' tidak diizinkan di nama index.", &[&c]));
     }
     Ok(())
 }
 
+/// Header kolom jumlah dokumen: singkat di English supaya kolom tetap sempit.
+fn docs_header() -> &'static str {
+    match i18n::lang() {
+        i18n::Lang::Id => "Dokumen",
+        i18n::Lang::En => "Docs",
+    }
+}
+
+/// "Dokumen" sebagai label penuh (tab, ringkasan); kunci global `Dokumen` bermakna Discover.
+fn documents_label() -> &'static str {
+    match i18n::lang() {
+        i18n::Lang::Id => "Dokumen",
+        i18n::Lang::En => "Documents",
+    }
+}
+
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("Index {0} dibuat.", "Index {0} created."),
+    ("Index {0} dihapus.", "Index {0} deleted."),
+    ("Index {0} dibuka.", "Index {0} opened."),
+    ("Index {0} ditutup.", "Index {0} closed."),
+    ("Index {0} di-refresh.", "Index {0} refreshed."),
+    ("Index {0} di-flush.", "Index {0} flushed."),
+    (
+        "Cache index {0} dibersihkan.",
+        "Cache of index {0} cleared.",
+    ),
+    ("Settings {0} diperbarui.", "Settings of {0} updated."),
+    (
+        "Field baru ditambahkan ke mapping {0}.",
+        "New field added to the mapping of {0}.",
+    ),
+    ("ILM {0} dicoba ulang.", "ILM for {0} retried."),
+    ("Alias {0} diperbarui.", "Aliases of {0} updated."),
+    (
+        "Force merge {0} berjalan di latar (lihat GET /_tasks?actions=*forcemerge*).",
+        "Force merge of {0} is running in the background (see GET /_tasks?actions=*forcemerge*).",
+    ),
+    ("Rollover {0} selesai.", "Rollover of {0} finished."),
+    ("Reindex {0} → {1} dimulai.", "Reindex {0} → {1} started."),
+    (
+        "Delete by query di {0} dimulai.",
+        "Delete by query on {0} started.",
+    ),
+    (
+        "Update by query di {0} dimulai.",
+        "Update by query on {0} started.",
+    ),
+    (
+        "Setting statis {0} diperbarui dan index dibuka kembali.",
+        "Static settings of {0} updated and the index was reopened.",
+    ),
+    (
+        "{0} {1} → {2} dibuat. {1} masih diblok tulis; buka blok setelah {2} green.",
+        "{0} {1} → {2} created. {1} is still write-blocked; remove the block once {2} is green.",
+    ),
+    ("Cari index…", "Search indices…"),
+    ("Tampilkan index sistem (.)", "Show system indices (.)"),
+    ("semua", "all"),
+    ("⟳ Muat ulang", "⟳ Reload"),
+    ("+ Buat index", "+ Create index"),
+    ("Menjalankan aksi…", "Running action…"),
+    ("Buka di Dev Tools:\n{0}", "Open in Dev Tools:\n{0}"),
+    ("{0} index ditampilkan dari {1}", "{0} indices shown of {1}"),
+    ("Ukuran", "Size"),
+    ("Dibuat", "Created"),
+    ("Alias / data stream", "Aliases / data stream"),
+    ("Buka di Discover", "Open in Discover"),
+    ("Buka di Dev Tools", "Open in Dev Tools"),
+    (
+        "Profile read-only: aksi disembunyikan.",
+        "Read-only profile: actions hidden.",
+    ),
+    (
+        "Index sistem: aksi destruktif dikunci.",
+        "System index: destructive actions locked.",
+    ),
+    (
+        "Hapus atau update dokumen yang cocok query",
+        "Delete or update documents matching a query",
+    ),
+    (
+        "Salin dokumen ke index lain (async + progress)",
+        "Copy documents to another index (async + progress)",
+    ),
+    (
+        "User tidak punya privilege `{0}` pada index ini.",
+        "The user lacks the `{0}` privilege on this index.",
+    ),
+    ("Ubah setting statis…", "Change static setting…"),
+    (
+        "Butuh close → update → open (index tidak tersedia sesaat)",
+        "Needs close → update → open (the index is briefly unavailable)",
+    ),
+    ("Tampilkan default", "Show defaults"),
+    (
+        "Mengubah tipe field yang sudah ada butuh reindex ke index baru.",
+        "Changing the type of an existing field requires reindexing into a new index.",
+    ),
+    ("Index kosong.", "Index is empty."),
+    ("primer", "primary"),
+    ("replika", "replica"),
+    ("Alasan: {0}", "Reason: {0}"),
+    ("Alasan unassigned: {0}", "Unassigned reason: {0}"),
+    ("Response lengkap", "Full response"),
+    (
+        "Index ini tidak dikelola ILM.",
+        "This index is not managed by ILM.",
+    ),
+    ("Coba ulang ILM", "Retry ILM"),
+    ("index sudah dibuka kembali", "the index was reopened"),
+    (
+        "GAGAL membuka kembali index, buka manual",
+        "FAILED to reopen the index, open it manually",
+    ),
+    ("Setting statis · {0}", "Static setting · {0}"),
+    (
+        "Index akan ditutup sesaat (tidak bisa dicari/ditulis), diubah, lalu dibuka kembali.",
+        "The index will be closed briefly (not searchable/writable), modified, then reopened.",
+    ),
+    ("Setting", "Setting"),
+    ("Nilai (JSON)", "Value (JSON)"),
+    (
+        "Nilai berupa JSON: string pakai kutip, angka/boolean/objek apa adanya (mis. analysis).",
+        "The value is JSON: strings in quotes, numbers/booleans/objects as-is (e.g. analysis).",
+    ),
+    ("Nilai bukan JSON: {0}", "Value is not JSON: {0}"),
+    (
+        "Nama setting diawali index. atau analysis",
+        "The setting name must start with index. or analysis",
+    ),
+    (
+        "Clone / Shrink / Split · {0}",
+        "Clone / Shrink / Split · {0}",
+    ),
+    ("Index tujuan", "Target index"),
+    ("Shard primer", "Primary shards"),
+    (
+        "Shard primer sumber: {0}. {1} akan diblok tulis (index.blocks.write) sebelum operasi.",
+        "Source primary shards: {0}. {1} will be write-blocked (index.blocks.write) before the operation.",
+    ),
+    (
+        "Shrink butuh satu salinan setiap shard di satu node yang sama (otomatis di cluster single-node).",
+        "Shrink needs one copy of every shard on the same node (automatic on a single-node cluster).",
+    ),
+    ("Jalankan", "Run"),
+    ("{0} task {1}", "{0} task {1}"),
+    ("selesai, {0} gagal", "finished, {0} failed"),
+    ("selesai", "finished"),
+    ("Batalkan", "Cancel"),
+    ("{0} dipilih:", "{0} selected:"),
+    ("Batal pilih", "Deselect"),
+    ("Sumber", "Source"),
+    ("Tujuan", "Target"),
+    (
+        "opsional, mis. status:active",
+        "optional, e.g. status:active",
+    ),
+    (
+        "Tujuan harus berbeda dari sumber.",
+        "The target must differ from the source.",
+    ),
+    (
+        "Index tujuan dibuat otomatis jika belum ada (mapping dinamis). Buat dulu dengan mapping yang benar bila perlu.",
+        "The target index is created automatically if it does not exist (dynamic mapping). Create it first with the right mapping if needed.",
+    ),
+    ("Mulai reindex", "Start reindex"),
+    ("By query · {0}", "By query · {0}"),
+    ("Hapus dokumen", "Delete documents"),
+    ("Update dokumen", "Update documents"),
+    (
+        "Query (KQL; kosong = semua dokumen)",
+        "Query (KQL; empty = all documents)",
+    ),
+    (
+        "Script Painless (opsional, mis. ctx._source.status = 'arsip')",
+        "Painless script (optional, e.g. ctx._source.status = 'archived')",
+    ),
+    ("Hitung dokumen", "Count documents"),
+    ("{0} dokumen cocok", "{0} documents match"),
+    ("Ketik HAPUS untuk konfirmasi:", "Type HAPUS to confirm:"),
+    (
+        "Berjalan async dengan conflicts=proceed; progress tampil di atas daftar index.",
+        "Runs asynchronously with conflicts=proceed; progress is shown above the index list.",
+    ),
+    ("Hapus index?", "Delete index?"),
+    (
+        "Index {0} dan semua dokumennya akan dihapus permanen. Aksi ini tidak bisa dibatalkan.",
+        "Index {0} and all its documents will be permanently deleted. This cannot be undone.",
+    ),
+    ("Ubah setting statis?", "Change static setting?"),
+    (
+        "{0} akan ditutup, diubah, lalu dibuka kembali (sementara tidak tersedia).",
+        "{0} will be closed, modified, then reopened (temporarily unavailable).",
+    ),
+    ("Clone/Shrink/Split?", "Clone/Shrink/Split?"),
+    (
+        "{0} akan diblok tulis, lalu {1} dibuat dari {0}.",
+        "{0} will be write-blocked, then {1} is created from {0}.",
+    ),
+    (
+        "Force merge {0} ke 1 segment memakan I/O dan CPU besar. Jangan jalankan pada index yang masih aktif ditulisi.",
+        "Force merging {0} down to 1 segment uses a lot of I/O and CPU. Do not run it on an index that is still being written to.",
+    ),
+    (
+        "{0} akan menulis ke backing index baru mulai sekarang.",
+        "{0} will write to a new backing index from now on.",
+    ),
+    ("Tutup index?", "Close index?"),
+    (
+        "Index {0} tidak bisa dicari atau ditulisi sampai dibuka kembali.",
+        "Index {0} cannot be searched or written to until it is reopened.",
+    ),
+    ("Lanjutkan?", "Continue?"),
+    ("Buat index", "Create index"),
+    ("Replika", "Replicas"),
+    ("Mappings (JSON, opsional)", "Mappings (JSON, optional)"),
+    ("Buat", "Create"),
+    (
+        "Index ini belum punya alias.",
+        "This index has no aliases yet.",
+    ),
+    ("nama alias", "alias name"),
+    ("Tambah alias", "Add alias"),
+    ("Request:\n{0}", "Request:\n{0}"),
+    ("Mappings tidak valid: {0}", "Invalid mappings: {0}"),
+    ("Shard primer / replika", "Primary / replica shards"),
+    ("Dokumen terhapus", "Deleted documents"),
+    ("Ukuran total", "Total size"),
+    ("Ukuran primer", "Primary size"),
+    ("Setting dinamis", "Dynamic settings"),
+    ("default 1s, -1 = mati", "default 1s, -1 = off"),
+    ("default 10000", "default 10000"),
+    (
+        "number_of_replicas harus angka.",
+        "number_of_replicas must be a number.",
+    ),
+    (
+        "max_result_window harus angka.",
+        "max_result_window must be a number.",
+    ),
+    ("Simpan settings", "Save settings"),
+    ("Tambah field", "Add field"),
+    ("nama.field", "field.name"),
+    (
+        "Shrink: jumlah shard harus faktor dari {0} dan lebih kecil.",
+        "Shrink: the shard count must be a factor of {0} and smaller.",
+    ),
+    (
+        "Split: jumlah shard harus kelipatan {0} dan lebih besar.",
+        "Split: the shard count must be a multiple of {0} and larger.",
+    ),
+    ("Nama index wajib diisi.", "The index name is required."),
+    (
+        "Nama index maksimal 255 byte.",
+        "The index name can be at most 255 bytes.",
+    ),
+    (
+        "Nama index harus huruf kecil.",
+        "The index name must be lowercase.",
+    ),
+    (
+        "Nama index tidak boleh diawali -, _, atau +.",
+        "The index name must not start with -, _ or +.",
+    ),
+    (
+        "Nama index tidak boleh . atau ..",
+        "The index name must not be . or ..",
+    ),
+    (
+        "Karakter '{0}' tidak diizinkan di nama index.",
+        "The character '{0}' is not allowed in an index name.",
+    ),
+    ("Umur", "Age"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("indices.rs"), EN);
+        crate::i18n::assert_keys(["Tipe", "Umur", "Hapus"]);
+    }
 
     // NFR: filter + sort 10.000 index < 20 ms (release).
     #[test]
