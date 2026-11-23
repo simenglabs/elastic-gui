@@ -8,6 +8,7 @@ mod ui;
 mod widgets;
 
 fn main() -> eframe::Result {
+    app::timing::start();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default().with_maximized(true),
         ..Default::default()

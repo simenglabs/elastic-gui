@@ -143,6 +143,50 @@ fn load_info(conn: &Conn) -> Result<ClusterInfo, String> {
     })
 }
 
+/// NFR: pengukuran startup opsional lewat `ELASTIC_GUI_TIMING=1`.
+pub mod timing {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Instant;
+
+    static START: OnceLock<Instant> = OnceLock::new();
+    static DONE: AtomicBool = AtomicBool::new(false);
+
+    fn enabled() -> bool {
+        std::env::var("ELASTIC_GUI_TIMING").is_ok_and(|v| v == "1")
+    }
+
+    pub fn start() {
+        if enabled() {
+            let _ = START.set(Instant::now());
+        }
+    }
+
+    /// Dicetak sekali, saat guard dilepas di akhir frame pertama.
+    pub struct FirstFrame;
+
+    impl Drop for FirstFrame {
+        fn drop(&mut self) {
+            let Some(start) = START.get() else { return };
+            if DONE.swap(true, Ordering::Relaxed) {
+                return;
+            }
+            let ms = start.elapsed().as_secs_f64() * 1000.0;
+            let rss = rss_kb().map_or("n/a".to_string(), |kb| format!("{} MB", kb / 1024));
+            eprintln!("[timing] frame pertama selesai: {ms:.0} ms dari main(); RSS: {rss}");
+        }
+    }
+
+    // `ps` hanya ada di macOS/Linux; di Windows dilewati.
+    fn rss_kb() -> Option<u64> {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    }
+}
+
 pub struct DesktopApp {
     store: Store,
     profiles: Vec<Profile>,
@@ -516,6 +560,7 @@ impl DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let _first_frame = timing::FirstFrame;
         let ctx = ui.ctx().clone();
         for ws in self.workspaces.values_mut() {
             ws.tick(&ctx);

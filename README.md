@@ -83,6 +83,27 @@ ELASTIC_URL=... ELASTIC_USER=... ELASTIC_PASSWORD=... LIVE_PATTERN='logs-*' \
 
 Hasil build berada di `target/release/elastic-gui` (`elastic-gui.exe` pada Windows). Build menghasilkan executable untuk OS tempat perintah dijalankan; installer dan app bundle belum dikonfigurasi.
 
+## Pengukuran performa
+
+Target NFR (PRD bagian 8): startup <= 1 dtk sampai jendela tampil (release), daftar 10.000 index lancar, editor 5.000 baris responsif.
+
+Test performa tidak butuh cluster dan harus dijalankan di build release:
+
+```sh
+cargo test --release -- --ignored perf --nocapture
+```
+
+- `perf_highlight_5k_lines`: `widgets::highlight` pada 5.000 baris Console, batas < 50 ms.
+- `perf_filter_sort_10k_rows`: filter + sort 10.000 baris index, batas < 20 ms.
+
+Waktu startup dan memori:
+
+```sh
+ELASTIC_GUI_TIMING=1 target/release/elastic-gui
+```
+
+Saat frame pertama selesai digambar, stderr mencetak `[timing] frame pertama selesai: N ms dari main(); RSS: M MB`. N adalah waktu sejak awal `main()`, M adalah memori proses (via `ps`, tidak tersedia di Windows). Tanpa variabel itu tidak ada output.
+
 ## Kebutuhan sistem
 
 - **macOS:** Xcode Command Line Tools (`xcode-select --install`).

@@ -417,6 +417,24 @@ pub fn format_time_ms(ms: i64) -> String {
 mod tests {
     use super::*;
 
+    // NFR: highlight 5.000 baris Console < 50 ms (release).
+    #[test]
+    #[ignore = "perf"]
+    fn perf_highlight_5k_lines() {
+        let mut text = String::new();
+        while text.lines().count() < 5000 {
+            text.push_str("POST /logs-*/_search\n{\n  \"query\": {\n    \"match\": { \"message\": \"error 42\" }\n  },\n  \"size\": 10,\n  \"sort\": [true, null]\n}\n");
+        }
+        let start = std::time::Instant::now();
+        let job = highlight(&text, Lang::Console, true);
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        eprintln!(
+            "PERF highlight_5k: {ms:.2} ms ({} bagian)",
+            job.sections.len()
+        );
+        assert!(ms < 50.0, "terlalu lambat: {ms:.2} ms");
+    }
+
     #[test]
     fn formats_numbers() {
         assert_eq!(format_bytes(512.0), "512 B");

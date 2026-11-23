@@ -34,6 +34,43 @@ impl Row {
     }
 }
 
+/// Fungsi murni di balik `visible_rows` agar bisa diukur tanpa UI (NFR: 10.000 index).
+fn filter_sort_rows<'a>(
+    rows: &'a [Row],
+    filter: &str,
+    show_hidden: bool,
+    health_filter: Option<&str>,
+    sort: Option<(Col, bool)>,
+) -> Vec<&'a Row> {
+    let needle = filter.to_lowercase();
+    let mut rows: Vec<&Row> = rows
+        .iter()
+        .filter(|r| show_hidden || !r.system())
+        .filter(|r| {
+            needle.is_empty()
+                || r.name.to_lowercase().contains(&needle)
+                || r.aliases.iter().any(|a| a.contains(&needle))
+        })
+        .filter(|r| health_filter.is_none_or(|h| r.health == h))
+        .collect();
+    if let Some((col, asc)) = sort {
+        rows.sort_by(|a, b| {
+            let ord = match col {
+                Col::Name => a.name.cmp(&b.name),
+                Col::Health => a.health.cmp(&b.health),
+                Col::Status => a.status.cmp(&b.status),
+                Col::Pri => a.pri.cmp(&b.pri),
+                Col::Rep => a.rep.cmp(&b.rep),
+                Col::Docs => a.docs.cmp(&b.docs),
+                Col::Size => a.size.total_cmp(&b.size),
+                Col::Created => a.created.cmp(&b.created),
+            };
+            if asc { ord } else { ord.reverse() }
+        });
+    }
+    rows
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Col {
     Name,
@@ -561,34 +598,13 @@ impl Indices {
     }
 
     fn visible_rows(&self) -> Vec<&Row> {
-        let needle = self.filter.to_lowercase();
-        let mut rows: Vec<&Row> = self
-            .rows
-            .iter()
-            .filter(|r| self.show_hidden || !r.system())
-            .filter(|r| {
-                needle.is_empty()
-                    || r.name.to_lowercase().contains(&needle)
-                    || r.aliases.iter().any(|a| a.contains(&needle))
-            })
-            .filter(|r| self.health_filter.is_none_or(|h| r.health == h))
-            .collect();
-        if let Some((col, asc)) = self.sort {
-            rows.sort_by(|a, b| {
-                let ord = match col {
-                    Col::Name => a.name.cmp(&b.name),
-                    Col::Health => a.health.cmp(&b.health),
-                    Col::Status => a.status.cmp(&b.status),
-                    Col::Pri => a.pri.cmp(&b.pri),
-                    Col::Rep => a.rep.cmp(&b.rep),
-                    Col::Docs => a.docs.cmp(&b.docs),
-                    Col::Size => a.size.total_cmp(&b.size),
-                    Col::Created => a.created.cmp(&b.created),
-                };
-                if asc { ord } else { ord.reverse() }
-            });
-        }
-        rows
+        filter_sort_rows(
+            &self.rows,
+            &self.filter,
+            self.show_hidden,
+            self.health_filter,
+            self.sort,
+        )
     }
 
     fn table(&mut self, ui: &mut egui::Ui, cx: &mut Ctx) {
@@ -2223,6 +2239,43 @@ pub fn validate_index_name(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NFR: filter + sort 10.000 index < 20 ms (release).
+    #[test]
+    #[ignore = "perf"]
+    fn perf_filter_sort_10k_rows() {
+        let rows: Vec<Row> = (0..10_000u64)
+            .map(|i| Row {
+                name: if i % 50 == 0 {
+                    format!(".sys-{i}")
+                } else {
+                    format!("logs-app-{}-{i:06}", i % 17)
+                },
+                health: ["green", "yellow", "red"][(i % 3) as usize].into(),
+                status: "open".into(),
+                pri: i % 5 + 1,
+                rep: i % 2,
+                docs: i * 37 % 1_000_003,
+                deleted: 0,
+                size: (i * 7919 % 100_003) as f64,
+                created: 1_700_000_000_000 + i as i64,
+                aliases: vec![format!("alias-{}", i % 100)],
+                data_stream: None,
+            })
+            .collect();
+        let start = std::time::Instant::now();
+        let out = filter_sort_rows(
+            &rows,
+            "logs-app",
+            false,
+            Some("green"),
+            Some((Col::Docs, false)),
+        );
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        eprintln!("PERF filter_sort_10k: {ms:.2} ms ({} baris)", out.len());
+        assert!(!out.is_empty());
+        assert!(ms < 20.0, "terlalu lambat: {ms:.2} ms");
+    }
 
     #[test]
     fn validates_resize_shards() {
