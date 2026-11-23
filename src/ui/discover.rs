@@ -1048,6 +1048,24 @@ impl Discover {
                     if ui.small_button("−").on_hover_text("Hapus kolom").clicked() {
                         self.columns.retain(|c| c != &f.name);
                     }
+                    // DIS-31: urutan kolom (right_to_left, jadi ↓ ditambah lebih dulu).
+                    if let Some(i) = self.columns.iter().position(|c| c == &f.name) {
+                        let last = i + 1 == self.columns.len();
+                        if ui
+                            .add_enabled(!last, egui::Button::new("↓").small())
+                            .on_hover_text("Geser kolom ke bawah")
+                            .clicked()
+                        {
+                            move_column(&mut self.columns, i, 1);
+                        }
+                        if ui
+                            .add_enabled(i > 0, egui::Button::new("↑").small())
+                            .on_hover_text("Geser kolom ke atas")
+                            .clicked()
+                        {
+                            move_column(&mut self.columns, i, -1);
+                        }
+                    }
                 } else if ui.small_button("+").on_hover_text("Tambah kolom").clicked() {
                     self.columns.push(f.name.clone());
                 }
@@ -1346,6 +1364,7 @@ impl Discover {
         let columns = self.columns.clone();
         let mut clicked_row = None;
         let mut sort_click = None;
+        let mut move_click: Option<(usize, isize)> = None;
         let selected = self.selected;
         let height = ui.available_height() - 30.0;
         let mut builder = TableBuilder::new(ui)
@@ -1390,8 +1409,23 @@ impl Discover {
                         }
                     });
                 }
-                for c in &columns {
+                for (idx, c) in columns.iter().enumerate() {
                     header.col(|ui| {
+                        // DIS-31: geser kolom ke kiri/kanan.
+                        if ui
+                            .add_enabled(idx > 0, egui::Button::new("◀").small())
+                            .on_hover_text("Geser kolom ke kiri")
+                            .clicked()
+                        {
+                            move_click = Some((idx, -1));
+                        }
+                        if ui
+                            .add_enabled(idx + 1 < columns.len(), egui::Button::new("▶").small())
+                            .on_hover_text("Geser kolom ke kanan")
+                            .clicked()
+                        {
+                            move_click = Some((idx, 1));
+                        }
                         let target = sort_target(c, fields);
                         let text = RichText::new(header_label(c)).strong();
                         if let Some(target) = target {
@@ -1443,6 +1477,9 @@ impl Discover {
                     }
                 });
             });
+        if let Some((i, delta)) = move_click {
+            move_column(&mut self.columns, i, delta);
+        }
         if let Some(i) = clicked_row {
             self.selected = if self.selected == Some(i) {
                 None
@@ -2329,9 +2366,44 @@ pub(crate) fn format_hit_time(text: &str) -> String {
     }
 }
 
+/// DIS-31: tukar kolom `index` dengan tetangganya (`delta` = -1 kiri, +1 kanan).
+/// Mengembalikan `false` tanpa mengubah apa pun bila tujuan di luar batas.
+fn move_column(columns: &mut [String], index: usize, delta: isize) -> bool {
+    let Some(target) = index.checked_add_signed(delta) else {
+        return false;
+    };
+    if index >= columns.len() || target >= columns.len() {
+        return false;
+    }
+    columns.swap(index, target);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cols(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn move_column_left_and_right() {
+        let mut c = cols(&["a", "b", "c"]);
+        assert!(move_column(&mut c, 1, -1));
+        assert_eq!(c, cols(&["b", "a", "c"]));
+        assert!(move_column(&mut c, 1, 1));
+        assert_eq!(c, cols(&["b", "c", "a"]));
+    }
+
+    #[test]
+    fn move_column_edges_and_invalid_index() {
+        let mut c = cols(&["a", "b"]);
+        assert!(!move_column(&mut c, 0, -1));
+        assert!(!move_column(&mut c, 1, 1));
+        assert!(!move_column(&mut c, 5, -1));
+        assert_eq!(c, cols(&["a", "b"]));
+    }
 
     #[test]
     fn flattens_source_and_reads_hits() {
