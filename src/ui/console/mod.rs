@@ -15,6 +15,7 @@ use serde_json::Value;
 use super::Ctx;
 use crate::es::client::{Response, Source, is_ndjson};
 use crate::es::{Conn, spec};
+use crate::i18n::{self, t, tf};
 use crate::profile::AuthKind;
 use crate::task::{Pending, poll};
 use crate::widgets::{self, Confirm, Highlighter, Lang};
@@ -127,7 +128,7 @@ impl Default for Console {
             loaded: false,
             tabs: vec![Tab {
                 name: "Console".into(),
-                text: WELCOME.into(),
+                text: t(WELCOME).into(),
                 target: None,
                 folds: Default::default(),
             }],
@@ -248,7 +249,7 @@ impl Console {
                 }
                 let r = ui
                     .selectable_label(self.active == i, &self.tabs[i].name)
-                    .on_hover_text("Klik dua kali untuk ganti nama");
+                    .on_hover_text(t("Klik dua kali untuk ganti nama"));
                 if r.clicked() {
                     self.active = i;
                     self.popup = None;
@@ -260,7 +261,7 @@ impl Console {
                     close = Some(i);
                 }
             }
-            if ui.small_button("+").on_hover_text("Tab baru").clicked() {
+            if ui.small_button("+").on_hover_text(t("Tab baru")).clicked() {
                 self.tabs.push(Tab {
                     name: format!("Console {}", self.tabs.len() + 1),
                     text: String::new(),
@@ -279,10 +280,10 @@ impl Console {
             let running = self.pending.is_some();
             if running {
                 ui.spinner();
-                if ui.button("■ Batal").clicked() {
+                if ui.button(t("■ Batal")).clicked() {
                     self.pending = None;
                     self.started = None;
-                    self.notice = Some("Dibatalkan. Membatalkan task di server…".into());
+                    self.notice = Some(t("Dibatalkan. Membatalkan task di server…").into());
                     if let Some((source, opaque)) = self.running.take() {
                         self.cancel_pending = Some(Pending::spawn(ui.ctx(), move || {
                             crate::es::client::cancel_opaque(&*source.open()?, &opaque)
@@ -290,18 +291,22 @@ impl Console {
                     }
                 }
             } else if ui
-                .button("▶ Jalankan")
+                .button(t("▶ Jalankan"))
                 .on_hover_text("Ctrl/Cmd+Enter")
                 .clicked()
             {
                 self.run_at_cursor(ui.ctx(), cx);
             }
-            if ui.button("Rapikan").on_hover_text("Ctrl/Cmd+I").clicked() {
+            if ui
+                .button(t("Rapikan"))
+                .on_hover_text("Ctrl/Cmd+I")
+                .clicked()
+            {
                 self.format_at_cursor(ui.ctx());
             }
             if ui
-                .button("Salin cURL")
-                .on_hover_text("Kredensial disamarkan")
+                .button(t("Salin cURL"))
+                .on_hover_text(t("Kredensial disamarkan"))
                 .clicked()
                 && let Ok((source, _)) = self.target(cx)
             {
@@ -317,13 +322,13 @@ impl Console {
             }
             ui.menu_button("Snippet", |ui| {
                 for (name, text) in parse::SNIPPETS {
-                    if ui.button(*name).clicked() {
+                    if ui.button(t(name)).clicked() {
                         self.incoming = Some((*text).to_owned());
                         ui.close();
                     }
                 }
             });
-            ui.menu_button("Impor cURL", |ui| {
+            ui.menu_button(t("Impor cURL"), |ui| {
                 ui.set_min_width(420.0);
                 ui.add(
                     egui::TextEdit::multiline(&mut self.curl_input)
@@ -332,7 +337,7 @@ impl Console {
                         .desired_width(f32::INFINITY)
                         .hint_text("curl -X GET 'https://host:9200/_search' -d '{...}'"),
                 );
-                if ui.button("Impor").clicked() {
+                if ui.button(t("Impor")).clicked() {
                     match parse::from_curl(&self.curl_input) {
                         Ok(text) => {
                             self.incoming = Some(text);
@@ -347,14 +352,14 @@ impl Console {
             ui.toggle_value(&mut self.history_open, "History");
             ui.toggle_value(
                 &mut self.vars_open,
-                format!("Variabel ({})", self.vars.len()),
+                tf("Variabel ({0})", &[&self.vars.len()]),
             );
             if let Some(block) = self.selected_blocks(ui.ctx()).first()
                 && let Some(endpoint) =
                     spec::for_major(cx.caps.major).find(&block.method, &block.path)
                 && !endpoint.doc.is_empty()
             {
-                ui.hyperlink_to(format!("Dok: {}", endpoint.name), &endpoint.doc);
+                ui.hyperlink_to(tf("Dok: {0}", &[&endpoint.name]), &endpoint.doc);
             }
             // CON-64: cluster target tab ini.
             let current = self.tabs[self.active].target.clone();
@@ -362,21 +367,21 @@ impl Console {
                 .as_ref()
                 .and_then(|id| cx.profiles.iter().find(|p| &p.id == id))
                 .map_or_else(
-                    || format!("{} (aktif)", cx.profile.name),
+                    || tf("{0} (aktif)", &[&cx.profile.name]),
                     |p| p.name.clone(),
                 );
             let mut chosen = current.clone();
             egui::ComboBox::from_id_salt(("console_target", self.active))
                 .selected_text(format!("→ {label}"))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut chosen, None, format!("{} (aktif)", cx.profile.name));
+                    ui.selectable_value(&mut chosen, None, tf("{0} (aktif)", &[&cx.profile.name]));
                     for p in cx.profiles.iter().filter(|p| p.id != cx.profile.id) {
                         let text = format!("{} · {}", p.name, p.env.label());
                         ui.selectable_value(&mut chosen, Some(p.id.clone()), text);
                     }
                 })
                 .response
-                .on_hover_text("Cluster tujuan request di tab ini");
+                .on_hover_text(t("Cluster tujuan request di tab ini"));
             if chosen != current {
                 self.tabs[self.active].target = chosen;
                 self.dirty_since = Some(Instant::now());
@@ -547,7 +552,7 @@ impl Console {
                 egui::FontId::proportional(11.0),
                 color,
             );
-            if response.on_hover_text("Jalankan request ini").clicked() {
+            if response.on_hover_text(t("Jalankan request ini")).clicked() {
                 run_block = Some(block.clone());
             }
         }
@@ -656,7 +661,11 @@ impl Console {
                     ui.visuals().weak_text_color(),
                 );
             }
-            let tip = if folded { "Buka lipatan" } else { "Lipat" };
+            let tip = if folded {
+                t("Buka lipatan")
+            } else {
+                t("Lipat")
+            };
             if response.on_hover_text(tip).clicked() {
                 toggle = Some((start, opener_end, end, folded));
             }
@@ -908,7 +917,7 @@ impl Console {
                             if popup.loading_fields {
                                 ui.horizontal(|ui| {
                                     ui.spinner();
-                                    ui.weak("memuat saran dari cluster…");
+                                    ui.weak(t("memuat saran dari cluster…"));
                                 });
                             }
                             for (i, item) in popup.items.iter().enumerate() {
@@ -936,7 +945,7 @@ impl Console {
                                 }
                             }
                         });
-                    ui.weak("↑↓ pilih · Enter/Tab terima · Esc tutup");
+                    ui.weak(t("↑↓ pilih · Enter/Tab terima · Esc tutup"));
                 });
             });
         if let Some(i) = clicked {
@@ -963,7 +972,7 @@ impl Console {
     fn run_at_cursor(&mut self, ctx: &egui::Context, cx: &mut Ctx) {
         let blocks = self.selected_blocks(ctx);
         if blocks.is_empty() {
-            self.notice = Some("Tidak ada request di posisi cursor.".into());
+            self.notice = Some(t("Tidak ada request di posisi cursor.").into());
             return;
         }
         let text = self.tabs[self.active].text.clone();
@@ -1029,7 +1038,7 @@ impl Console {
             .iter()
             .find(|p| p.id == id)
             .cloned()
-            .ok_or("Profile target tab ini sudah dihapus.")?;
+            .ok_or(t("Profile target tab ini sudah dihapus."))?;
         // Dibuat per eksekusi supaya perubahan profile target langsung berlaku.
         Ok((Source::Profile(Box::new(profile.clone())), profile))
     }
@@ -1069,11 +1078,14 @@ impl Console {
         }
         if let Some(r) = poll(&mut self.cancel_pending) {
             self.notice = Some(match r {
-                Ok(0) => "Dibatalkan. Task server sudah selesai atau tidak bisa dibatalkan.".into(),
-                Ok(n) => format!("Dibatalkan. {n} task di server dihentikan."),
-                Err(e) => {
-                    format!("Dibatalkan di aplikasi, tetapi gagal membatalkan task server: {e}")
+                Ok(0) => {
+                    t("Dibatalkan. Task server sudah selesai atau tidak bisa dibatalkan.").into()
                 }
+                Ok(n) => tf("Dibatalkan. {0} task di server dihentikan.", &[&n]),
+                Err(e) => tf(
+                    "Dibatalkan di aplikasi, tetapi gagal membatalkan task server: {0}",
+                    &[&e],
+                ),
             });
         }
         let Some(done) = poll(&mut self.pending) else {
@@ -1129,9 +1141,9 @@ impl Console {
         if let Some(started) = self.started {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(format!(
-                    "Menjalankan… {:.1} dtk",
-                    started.elapsed().as_secs_f32()
+                ui.label(tf(
+                    "Menjalankan… {0} dtk",
+                    &[&format!("{:.1}", started.elapsed().as_secs_f32())],
                 ));
             });
             ui.ctx().request_repaint_after(Duration::from_millis(100));
@@ -1141,12 +1153,12 @@ impl Console {
         }
         if self.results.is_empty() {
             if self.started.is_none() {
-                ui.weak("Hasil request akan tampil di sini.");
+                ui.weak(t("Hasil request akan tampil di sini."));
             }
             return;
         }
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.tree_view, false, "Teks");
+            ui.selectable_value(&mut self.tree_view, false, t("Teks"));
             ui.selectable_value(&mut self.tree_view, true, "Tree");
         });
         let multiple = self.results.len() > 1;
@@ -1178,15 +1190,15 @@ impl Console {
                                     resp.millis,
                                     widgets::format_bytes(resp.body.len() as f64)
                                 ));
-                                if ui.small_button("Salin").clicked() {
+                                if ui.small_button(t("Salin")).clicked() {
                                     ui.ctx().copy_text(resp.body.clone());
                                 }
-                                if resp.body.len() > VIEW_LIMIT && ui.small_button("Simpan ke file").clicked() {
+                                if resp.body.len() > VIEW_LIMIT && ui.small_button(t("Simpan ke file")).clicked() {
                                     save_to_file(&resp.body);
                                 }
                             }
                             Err(_) => {
-                                ui.label(RichText::new("Gagal").color(ui.visuals().error_fg_color).strong());
+                                ui.label(RichText::new(t("Gagal")).color(ui.visuals().error_fg_color).strong());
                             }
                         }
                     });
@@ -1205,9 +1217,9 @@ impl Console {
                                 widgets::code_view(ui, &r.pretty, Lang::Json, &mut Highlighter::default());
                             }
                             if resp.body.len() > VIEW_LIMIT {
-                                ui.weak(format!(
-                                    "Tampilan dipotong ({}). Simpan ke file untuk melihat semuanya.",
-                                    widgets::format_bytes(resp.body.len() as f64)
+                                ui.weak(tf(
+                                    "Tampilan dipotong ({0}). Simpan ke file untuk melihat semuanya.",
+                                    &[&widgets::format_bytes(resp.body.len() as f64)],
                                 ));
                             }
                         }
@@ -1219,8 +1231,8 @@ impl Console {
     }
 
     fn vars_ui(&mut self, ui: &mut egui::Ui, cx: &mut Ctx) {
-        ui.heading("Variabel");
-        ui.weak("Pakai di path atau body sebagai ${nama}.");
+        ui.heading(t("Variabel"));
+        ui.weak(t("Pakai di path atau body sebagai ${nama}."));
         let mut remove = None;
         let mut changed = false;
         egui::Grid::new("console_vars_grid")
@@ -1231,14 +1243,20 @@ impl Console {
                         .add(
                             egui::TextEdit::singleline(name)
                                 .desired_width(90.0)
-                                .hint_text("nama"),
+                                .hint_text(match i18n::lang() {
+                                    i18n::Lang::Id => "nama",
+                                    i18n::Lang::En => "name",
+                                }),
                         )
                         .changed();
                     changed |= ui
                         .add(
                             egui::TextEdit::singleline(value)
                                 .desired_width(140.0)
-                                .hint_text("nilai"),
+                                .hint_text(match i18n::lang() {
+                                    i18n::Lang::Id => "nilai",
+                                    i18n::Lang::En => "value",
+                                }),
                         )
                         .changed();
                     if ui.small_button("×").clicked() {
@@ -1251,7 +1269,7 @@ impl Console {
             self.vars.remove(i);
             changed = true;
         }
-        if ui.small_button("+ variabel").clicked() {
+        if ui.small_button(t("+ variabel")).clicked() {
             self.vars.push((String::new(), String::new()));
             changed = true;
         }
@@ -1262,7 +1280,7 @@ impl Console {
 
     fn history_ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("History");
-        ui.add(egui::TextEdit::singleline(&mut self.history_search).hint_text("Cari…"));
+        ui.add(egui::TextEdit::singleline(&mut self.history_search).hint_text(t("Cari…")));
         let needle = self.history_search.to_lowercase();
         let mut insert = None;
         egui::ScrollArea::vertical()
@@ -1279,7 +1297,7 @@ impl Console {
                     })
                     .take(300)
                 {
-                    let status = item.status.map_or("gagal".to_owned(), |s| s.to_string());
+                    let status = item.status.map_or(t("gagal").to_owned(), |s| s.to_string());
                     let when = widgets::format_time_ms(item.ts);
                     let response = ui
                         .add(
@@ -1288,9 +1306,9 @@ impl Console {
                             )
                             .wrap(),
                         )
-                        .on_hover_text(format!(
-                            "{when} · {status} · {} ms\nKlik untuk menyisipkan",
-                            item.millis
+                        .on_hover_text(tf(
+                            "{0} · {1} · {2} ms\nKlik untuk menyisipkan",
+                            &[&when, &status, &item.millis],
                         ));
                     if response.clicked() {
                         insert = Some(item.clone());
@@ -1318,9 +1336,9 @@ impl Console {
             .iter()
             .map(|p| format!("{} {}", p.method, p.path))
             .collect();
-        let message = format!(
-            "Profile PROD. Request berikut dapat menghapus atau mengubah data:\n\n{}",
-            list.join("\n")
+        let message = tf(
+            "Profile PROD. Request berikut dapat menghapus atau mengubah data:\n\n{0}",
+            &[&list.join("\n")],
         );
         let wildcard = prepared
             .iter()
@@ -1328,7 +1346,7 @@ impl Console {
         let expected = wildcard.then_some("HAPUS");
         match widgets::confirm_dialog(
             ctx,
-            "Konfirmasi request berbahaya",
+            t("Konfirmasi request berbahaya"),
             &message,
             expected,
             &mut self.confirm_typed,
@@ -1402,7 +1420,7 @@ impl Console {
             ));
         }
         ctx.copy_text(curl);
-        self.notice = Some("cURL disalin (kredensial disamarkan).".into());
+        self.notice = Some(t("cURL disalin (kredensial disamarkan).").into());
     }
 }
 
@@ -1410,17 +1428,19 @@ impl Console {
 fn lint(spec: &spec::Spec, block: &Block, text: &str) -> Option<String> {
     let path = block.path.trim();
     if path.is_empty() {
-        return Some("Path request kosong.".into());
+        return Some(t("Path request kosong.").into());
     }
     if spec.find(&block.method, path).is_none() {
         let methods = spec.methods_for(path);
         return Some(if methods.is_empty() {
-            format!("Endpoint {path} tidak dikenal di spesifikasi API cluster ini.")
+            tf(
+                "Endpoint {0} tidak dikenal di spesifikasi API cluster ini.",
+                &[&path],
+            )
         } else {
-            format!(
-                "{} tidak didukung untuk {path}. Gunakan: {}.",
-                block.method,
-                methods.join(", ")
+            tf(
+                "{0} tidak didukung untuk {1}. Gunakan: {2}.",
+                &[&block.method, &path, &methods.join(", ")],
             )
         });
     }
@@ -1490,9 +1510,174 @@ pub fn byte_to_char(text: &str, byte: usize) -> usize {
     text[..byte.min(text.len())].chars().count()
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    (
+        "# Ctrl/Cmd+Enter: jalankan request di cursor. Ctrl+Space: saran.\n\
+# Ctrl/Cmd+I: rapikan JSON. Seleksi beberapa request untuk menjalankan semuanya.\n\
+GET /_cluster/health\n\n\
+GET /_cat/indices?v&s=store.size:desc\n\n\
+GET /_search\n{\n  \"query\": {\n    \"match_all\": {}\n  }\n}\n",
+        "# Ctrl/Cmd+Enter: run the request at the cursor. Ctrl+Space: suggestions.\n\
+# Ctrl/Cmd+I: format JSON. Select several requests to run them all.\n\
+GET /_cluster/health\n\n\
+GET /_cat/indices?v&s=store.size:desc\n\n\
+GET /_search\n{\n  \"query\": {\n    \"match_all\": {}\n  }\n}\n",
+    ),
+    ("Klik dua kali untuk ganti nama", "Double-click to rename"),
+    ("Tab baru", "New tab"),
+    ("■ Batal", "■ Cancel"),
+    (
+        "Dibatalkan. Membatalkan task di server…",
+        "Cancelled. Cancelling the task on the server…",
+    ),
+    ("▶ Jalankan", "▶ Run"),
+    ("Rapikan", "Format"),
+    ("Salin cURL", "Copy cURL"),
+    ("Kredensial disamarkan", "Credentials are masked"),
+    ("Impor cURL", "Import cURL"),
+    ("Impor", "Import"),
+    ("Variabel ({0})", "Variables ({0})"),
+    ("Dok: {0}", "Docs: {0}"),
+    ("{0} (aktif)", "{0} (active)"),
+    (
+        "Cluster tujuan request di tab ini",
+        "Target cluster for requests in this tab",
+    ),
+    ("Jalankan request ini", "Run this request"),
+    ("Buka lipatan", "Unfold"),
+    ("Lipat", "Fold"),
+    (
+        "memuat saran dari cluster…",
+        "loading suggestions from the cluster…",
+    ),
+    (
+        "↑↓ pilih · Enter/Tab terima · Esc tutup",
+        "↑↓ select · Enter/Tab accept · Esc close",
+    ),
+    (
+        "Tidak ada request di posisi cursor.",
+        "No request at the cursor position.",
+    ),
+    (
+        "Profile target tab ini sudah dihapus.",
+        "The target profile of this tab has been deleted.",
+    ),
+    (
+        "Dibatalkan. Task server sudah selesai atau tidak bisa dibatalkan.",
+        "Cancelled. The server task has already finished or cannot be cancelled.",
+    ),
+    (
+        "Dibatalkan. {0} task di server dihentikan.",
+        "Cancelled. {0} task(s) stopped on the server.",
+    ),
+    (
+        "Dibatalkan di aplikasi, tetapi gagal membatalkan task server: {0}",
+        "Cancelled in the app, but cancelling the server task failed: {0}",
+    ),
+    ("Menjalankan… {0} dtk", "Running… {0} s"),
+    (
+        "Hasil request akan tampil di sini.",
+        "Request results will appear here.",
+    ),
+    ("Teks", "Text"),
+    ("Salin", "Copy"),
+    ("Simpan ke file", "Save to file"),
+    ("Gagal", "Failed"),
+    (
+        "Tampilan dipotong ({0}). Simpan ke file untuk melihat semuanya.",
+        "Display truncated ({0}). Save to file to see everything.",
+    ),
+    ("Variabel", "Variables"),
+    (
+        "Pakai di path atau body sebagai ${nama}.",
+        "Use in the path or body as ${name}.",
+    ),
+    ("+ variabel", "+ variable"),
+    ("Cari…", "Search…"),
+    ("gagal", "failed"),
+    (
+        "{0} · {1} · {2} ms\nKlik untuk menyisipkan",
+        "{0} · {1} · {2} ms\nClick to insert",
+    ),
+    (
+        "Profile PROD. Request berikut dapat menghapus atau mengubah data:\n\n{0}",
+        "PROD profile. The following requests can delete or modify data:\n\n{0}",
+    ),
+    ("Konfirmasi request berbahaya", "Confirm dangerous request"),
+    (
+        "cURL disalin (kredensial disamarkan).",
+        "cURL copied (credentials masked).",
+    ),
+    ("Path request kosong.", "The request path is empty."),
+    (
+        "Endpoint {0} tidak dikenal di spesifikasi API cluster ini.",
+        "Endpoint {0} is not known in this cluster's API specification.",
+    ),
+    (
+        "{0} tidak didukung untuk {1}. Gunakan: {2}.",
+        "{0} is not supported for {1}. Use: {2}.",
+    ),
+    // Nama snippet bawaan (parse::SNIPPETS).
+    ("Index terbesar", "Largest indices"),
+    ("Node & disk", "Nodes & disk"),
+    ("Shard unassigned", "Unassigned shards"),
+    ("Task berjalan", "Running tasks"),
+    ("Pencarian dasar", "Basic search"),
+    ("Agregasi per waktu", "Aggregation over time"),
+    ("Reindex (async)", "Reindex (async)"),
+    // Pesan parser/cURL/variabel (parse.rs).
+    (
+        "JSON tidak valid (baris {0}, kolom {1}): {2}",
+        "Invalid JSON (line {0}, column {1}): {2}",
+    ),
+    (
+        "Body berisi lebih dari satu objek JSON. Pisahkan menjadi request terpisah.",
+        "The body contains more than one JSON object. Split it into separate requests.",
+    ),
+    (
+        "cURL: kutip tunggal tidak ditutup",
+        "cURL: unclosed single quote",
+    ),
+    (
+        "cURL: kutip ganda tidak ditutup",
+        "cURL: unclosed double quote",
+    ),
+    (
+        "Teks harus diawali `curl`.",
+        "The text must start with `curl`.",
+    ),
+    (
+        "URL tidak ditemukan di perintah cURL.",
+        "No URL found in the cURL command.",
+    ),
+    (
+        "Variabel `${` tidak ditutup dengan `}`.",
+        "Variable `${` is not closed with `}`.",
+    ),
+    (
+        "Variabel ${{0}} belum didefinisikan (panel Variabel).",
+        "Variable ${{0}} is not defined (Variables panel).",
+    ),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("mod.rs"), EN);
+        // Nama yang sama di kedua bahasa memang tidak masuk tabel.
+        let same = ["Cluster health", "Hot threads", "ES|QL"];
+        crate::i18n::assert_keys(
+            parse::SNIPPETS
+                .iter()
+                .map(|(name, _)| *name)
+                .filter(|name| !same.contains(name)),
+        );
+        crate::i18n::assert_keys([WELCOME]);
+    }
 
     #[test]
     fn lints_requests() {

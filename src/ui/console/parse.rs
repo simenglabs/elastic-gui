@@ -2,6 +2,8 @@
 
 use serde_json::Value;
 
+use crate::i18n::{t, tf};
+
 pub const METHODS: [&str; 6] = ["GET", "POST", "PUT", "DELETE", "HEAD", "PATCH"];
 
 /// Offset byte di teks editor.
@@ -102,10 +104,9 @@ fn values(body: &str) -> Result<Vec<Value>, String> {
         .into_iter::<Value>()
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
-            format!(
-                "JSON tidak valid (baris {}, kolom {}): {e}",
-                e.line(),
-                e.column()
+            tf(
+                "JSON tidak valid (baris {0}, kolom {1}): {2}",
+                &[&e.line(), &e.column(), &e],
             )
         })
 }
@@ -126,9 +127,9 @@ pub fn prepare_body(body: &str, ndjson: bool) -> Result<Option<String>, String> 
     }
     match values.as_slice() {
         [single] => Ok(Some(single.to_string())),
-        _ => {
-            Err("Body berisi lebih dari satu objek JSON. Pisahkan menjadi request terpisah.".into())
-        }
+        _ => Err(
+            t("Body berisi lebih dari satu objek JSON. Pisahkan menjadi request terpisah.").into(),
+        ),
     }
 }
 
@@ -161,7 +162,7 @@ fn shell_words(input: &str) -> Result<Vec<String>, String> {
                     match chars.next() {
                         Some('\'') => break,
                         Some(ch) => cur.push(ch),
-                        None => return Err("cURL: kutip tunggal tidak ditutup".into()),
+                        None => return Err(t("cURL: kutip tunggal tidak ditutup").into()),
                     }
                 }
             }
@@ -176,7 +177,7 @@ fn shell_words(input: &str) -> Result<Vec<String>, String> {
                             }
                         }
                         Some(ch) => cur.push(ch),
-                        None => return Err("cURL: kutip ganda tidak ditutup".into()),
+                        None => return Err(t("cURL: kutip ganda tidak ditutup").into()),
                     }
                 }
             }
@@ -209,7 +210,7 @@ fn shell_words(input: &str) -> Result<Vec<String>, String> {
 pub fn from_curl(input: &str) -> Result<String, String> {
     let words = shell_words(input.trim())?;
     if words.first().map(String::as_str) != Some("curl") {
-        return Err("Teks harus diawali `curl`.".into());
+        return Err(t("Teks harus diawali `curl`.").into());
     }
     let mut method = None;
     let mut url = None;
@@ -231,7 +232,7 @@ pub fn from_curl(input: &str) -> Result<String, String> {
             _ => {}
         }
     }
-    let url = url.ok_or("URL tidak ditemukan di perintah cURL.")?;
+    let url = url.ok_or(t("URL tidak ditemukan di perintah cURL."))?;
     let without_scheme = url.split_once("://").map_or(url.as_str(), |(_, rest)| rest);
     let path = without_scheme
         .find('/')
@@ -300,13 +301,18 @@ pub fn substitute(text: &str, vars: &[(String, String)]) -> Result<String, Strin
         let after = &rest[start + 2..];
         let end = after
             .find('}')
-            .ok_or("Variabel `${` tidak ditutup dengan `}`.")?;
+            .ok_or(t("Variabel `${` tidak ditutup dengan `}`."))?;
         let name = after[..end].trim();
         let value = vars
             .iter()
             .find(|(n, _)| n.trim() == name)
             .map(|(_, v)| v)
-            .ok_or_else(|| format!("Variabel ${{{name}}} belum didefinisikan (panel Variabel)."))?;
+            .ok_or_else(|| {
+                tf(
+                    "Variabel ${{0}} belum didefinisikan (panel Variabel).",
+                    &[&name],
+                )
+            })?;
         out.push_str(value);
         rest = &after[end + 1..];
     }
@@ -317,6 +323,11 @@ pub fn substitute(text: &str, vars: &[(String, String)]) -> Result<String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("parse.rs"), super::super::EN);
+    }
 
     const TEXT: &str = "# komentar\nGET /_cluster/health\n\nPOST logs/_search\n{\n  \"query\": {\"match_all\": {}}\n}\n\nPOST _bulk\n{\"index\":{\"_index\":\"a\"}}\n{\"f\":1}\n";
 

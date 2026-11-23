@@ -319,7 +319,14 @@ pub fn suggest(spec: &Spec, located: &Located, live: &Live) -> Outcome {
             }
             for common in ["pretty", "human", "error_trace", "filter_path"] {
                 if !items.iter().any(|s| s.label == common) {
-                    items.push(Suggestion::plain(common, "umum", format!("{common}=")));
+                    items.push(Suggestion::plain(
+                        common,
+                        match crate::i18n::lang() {
+                            crate::i18n::Lang::Id => "umum",
+                            crate::i18n::Lang::En => "common",
+                        },
+                        format!("{common}="),
+                    ));
                 }
             }
         }
@@ -391,7 +398,14 @@ pub fn suggest(spec: &Spec, located: &Located, live: &Live) -> Outcome {
                     } else {
                         v.clone()
                     };
-                    items.push(Suggestion::plain(&v, "nilai", insert));
+                    items.push(Suggestion::plain(
+                        &v,
+                        match crate::i18n::lang() {
+                            crate::i18n::Lang::Id => "nilai",
+                            crate::i18n::Lang::En => "value",
+                        },
+                        insert,
+                    ));
                 }
                 if needs.fields {
                     add_fields(&mut items, false);
