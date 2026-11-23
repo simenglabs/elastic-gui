@@ -1506,6 +1506,7 @@ fn render(ui: &mut egui::Ui, i: usize, panel: &Panel, data: &Data) -> Option<Eve
                     let mut stacked: Vec<BarChart> = Vec::new();
                     for (si, (name, points)) in series.iter().enumerate() {
                         let color = PALETTE[si % PALETTE.len()];
+                        let item = egui_plot::ItemId::new(("series", i, si));
                         match panel.style {
                             Style::Bar => {
                                 let bars = points
@@ -1517,6 +1518,7 @@ fn render(ui: &mut egui::Ui, i: usize, panel: &Panel, data: &Data) -> Option<Eve
                                     .collect();
                                 let refs: Vec<&BarChart> = stacked.iter().collect();
                                 let chart = BarChart::new(name.clone(), bars)
+                                    .id(item)
                                     .color(color)
                                     .stack_on(&refs);
                                 stacked.push(chart);
@@ -1524,7 +1526,7 @@ fn render(ui: &mut egui::Ui, i: usize, panel: &Panel, data: &Data) -> Option<Eve
                             Style::Line | Style::Area => {
                                 let pts: Vec<[f64; 2]> =
                                     points.iter().filter(|p| !p[1].is_nan()).copied().collect();
-                                let mut line = Line::new(name.clone(), pts).color(color);
+                                let mut line = Line::new(name.clone(), pts).id(item).color(color);
                                 if panel.style == Style::Area {
                                     line = line.fill(0.0);
                                 }
@@ -1536,7 +1538,7 @@ fn render(ui: &mut egui::Ui, i: usize, panel: &Panel, data: &Data) -> Option<Eve
                         plot.bar_chart(chart);
                     }
                 });
-            brush(ui, i, &response)
+            brush(ui, i, &response).or_else(|| series_click(i, panel, series, &response))
         }
         Data::Terms(list, other) => match panel.kind {
             Kind::Table => terms_table(ui, i, panel, list, *other),
@@ -1634,8 +1636,36 @@ fn brush(ui: &mut egui::Ui, i: usize, response: &egui_plot::PlotResponse<()>) ->
             return Some(Event::Zoom(a.min(b) as i64, a.max(b) as i64));
         }
     }
-    r.clone().on_hover_text("Drag untuk memilih rentang waktu");
+    r.clone()
+        .on_hover_text("Drag untuk memilih rentang waktu · klik seri untuk memfilter");
     None
+}
+
+/// DSH-14: pemetaan id item plot -> nama seri (id dibuat per indeks agar nama
+/// kembar tidak bertabrakan).
+fn series_ids(i: usize, series: &[(String, Vec<[f64; 2]>)]) -> Vec<(egui_plot::ItemId, String)> {
+    series
+        .iter()
+        .enumerate()
+        .map(|(si, (name, _))| (egui_plot::ItemId::new(("series", i, si)), name.clone()))
+        .collect()
+}
+
+/// DSH-14: klik (bukan drag) pada seri ter-hover menambah filter `split = seri`.
+fn series_click(
+    i: usize,
+    panel: &Panel,
+    series: &[(String, Vec<[f64; 2]>)],
+    response: &egui_plot::PlotResponse<()>,
+) -> Option<Event> {
+    if panel.split.is_empty() || !response.response.clicked() {
+        return None;
+    }
+    let hovered = response.hovered_plot_item?;
+    let name = series_ids(i, series)
+        .into_iter()
+        .find_map(|(id, name)| (id == hovered).then_some(name))?;
+    Some(Event::Filter(Filter::is(&panel.split, &name, false)))
 }
 
 fn terms_bars(
@@ -1857,6 +1887,20 @@ fn pie(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn series_ids_map_back_to_names() {
+        let series = vec![
+            ("a".to_owned(), vec![]),
+            ("b".to_owned(), vec![]),
+            ("a".to_owned(), vec![]),
+        ];
+        let ids = series_ids(3, &series);
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[1].1, "b");
+        assert_ne!(ids[0].0, ids[2].0);
+        assert_ne!(ids[0].0, series_ids(4, &series)[0].0);
+    }
 
     #[test]
     fn builds_panel_requests() {
