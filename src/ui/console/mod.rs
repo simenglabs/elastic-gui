@@ -1,6 +1,7 @@
 //! Dev Tools Console: editor multi-request, autocomplete, eksekusi, history.
 
 pub mod complete;
+pub mod fold;
 pub mod parse;
 
 use std::sync::Arc;
@@ -25,6 +26,8 @@ const HISTORY_FILE: &str = "console_history.json";
 const VARS_FILE: &str = "console_vars.json";
 const HISTORY_MAX: usize = 500;
 const VIEW_LIMIT: usize = 2 * 1024 * 1024;
+/// Lebar gutter editor: tombol ▶ + bar blok aktif, lalu penanda lipatan (CON-09).
+const GUTTER: f32 = 38.0;
 
 const WELCOME: &str = "# Ctrl/Cmd+Enter: jalankan request di cursor. Ctrl+Space: saran.\n\
 # Ctrl/Cmd+I: rapikan JSON. Seleksi beberapa request untuk menjalankan semuanya.\n\
@@ -39,6 +42,9 @@ struct Tab {
     /// CON-64: profile target tab ini (`None` = profile aktif).
     #[serde(default)]
     target: Option<String>,
+    /// CON-09: offset byte awal baris pembuka region yang terlipat.
+    #[serde(default)]
+    folds: std::collections::BTreeSet<usize>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -123,6 +129,7 @@ impl Default for Console {
                 name: "Console".into(),
                 text: WELCOME.into(),
                 target: None,
+                folds: Default::default(),
             }],
             active: 0,
             renaming: None,
@@ -258,6 +265,7 @@ impl Console {
                     name: format!("Console {}", self.tabs.len() + 1),
                     text: String::new(),
                     target: None,
+                    folds: Default::default(),
                 });
                 self.active = self.tabs.len() - 1;
                 self.dirty_since = Some(Instant::now());
@@ -447,8 +455,16 @@ impl Console {
             highlighter,
             ..
         } = self;
+        let Tab { text, folds, .. } = &mut tabs[*active];
+        let folds = &*folds;
         let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
-            let mut job = highlighter.job(buf.as_str(), Lang::Console, dark);
+            let buf = buf.as_str();
+            let mut job = highlighter.job(buf, Lang::Console, dark);
+            if !folds.is_empty() {
+                // CON-09: region terlipat hanya disembunyikan di layout; buffer utuh.
+                let hidden = fold::hidden_ranges(buf, &fold::fold_ranges(buf), folds);
+                fold::apply_hidden(&mut job, &hidden);
+            }
             job.wrap.max_width = wrap;
             ui.fonts_mut(|f| f.layout_job(job))
         };
@@ -456,14 +472,14 @@ impl Console {
             .id_salt(("console_scroll", *active))
             .auto_shrink(false)
             .show(ui, |ui| {
-                egui::TextEdit::multiline(&mut tabs[*active].text)
+                egui::TextEdit::multiline(text)
                     .id(id)
                     .code_editor()
                     .lock_focus(true)
                     .desired_width(f32::INFINITY)
                     .desired_rows(40)
                     .margin(egui::Margin {
-                        left: 26,
+                        left: GUTTER as i8,
                         right: 4,
                         top: 4,
                         bottom: 4,
@@ -531,6 +547,7 @@ impl Console {
             let text = self.tabs[self.active].text.clone();
             self.run_blocks(&ctx, cx, &text, &[block]);
         }
+        self.fold_gutter(ui, &output, cursor_char);
 
         // Ketikan: auto-close, auto-indent, dan pemicu autocomplete.
         let mut trigger = std::mem::take(&mut self.force_popup);
@@ -556,6 +573,94 @@ impl Console {
             self.popup = None;
         }
         self.popup_ui(&ctx, &output);
+    }
+
+    /// CON-09: penanda ▾/▸ di gutter, placeholder region terlipat, dan sinkron status lipatan.
+    fn fold_gutter(
+        &mut self,
+        ui: &egui::Ui,
+        output: &egui::text_edit::TextEditOutput,
+        cursor_char: Option<usize>,
+    ) {
+        let id = self.editor_id();
+        let tab = &mut self.tabs[self.active];
+        let text = tab.text.as_str();
+        let ranges = fold::fold_ranges(text);
+        fold::prune(&mut tab.folds, &ranges);
+        // Cursor masuk ke region tersembunyi (mis. panah bawah): buka lipatannya.
+        if let Some(c) = cursor_char.map(|c| char_to_byte(text, c)) {
+            for &(start, end) in &ranges {
+                let opener_end = text[start..].find('\n').map_or(end, |i| start + i);
+                if tab.folds.contains(&start) && opener_end < c && c <= end {
+                    tab.folds.remove(&start);
+                }
+            }
+        }
+        let hidden = fold::hidden_ranges(text, &ranges, &tab.folds);
+        let galley_pos = output.galley_pos;
+        let painter = ui.painter_at(output.response.rect);
+        let mut toggle = None;
+        for (i, &(start, end)) in ranges.iter().enumerate() {
+            // Pembuka yang berada di dalam region terlipat lain tidak terlihat.
+            if hidden.iter().any(|&(hs, he)| hs <= start && start < he) {
+                continue;
+            }
+            let opener_end = text[start..].find('\n').map_or(end, |i| start + i);
+            let row = output
+                .galley
+                .pos_from_cursor(CCursor::new(byte_to_char(text, start)));
+            let y = galley_pos.y + row.min.y;
+            let rect = egui::Rect::from_min_size(
+                egui::pos2(output.response.rect.left() + 22.0, y),
+                egui::vec2(GUTTER - 24.0, row.height()),
+            );
+            let folded = tab.folds.contains(&start);
+            let response = ui.interact(rect, id.with(("fold", i)), egui::Sense::click());
+            let color = if response.hovered() {
+                ui.visuals().strong_text_color()
+            } else {
+                ui.visuals().weak_text_color()
+            };
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                if folded { "▸" } else { "▾" },
+                egui::FontId::proportional(11.0),
+                color,
+            );
+            if folded {
+                let close = text[..end].trim_end().chars().next_back().unwrap_or('}');
+                let at = output
+                    .galley
+                    .pos_from_cursor(CCursor::new(byte_to_char(text, opener_end)));
+                painter.text(
+                    egui::pos2(galley_pos.x + at.max.x + 6.0, galley_pos.y + at.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("… {close}"),
+                    egui::FontId::monospace(widgets::MONO_SIZE),
+                    ui.visuals().weak_text_color(),
+                );
+            }
+            let tip = if folded { "Buka lipatan" } else { "Lipat" };
+            if response.on_hover_text(tip).clicked() {
+                toggle = Some((start, opener_end, end, folded));
+            }
+        }
+        if let Some((start, opener_end, end, folded)) = toggle {
+            if folded {
+                tab.folds.remove(&start);
+            } else {
+                tab.folds.insert(start);
+                // Cursor di dalam region yang dilipat dipindah ke akhir baris pembuka.
+                if cursor_char.is_some_and(|c| {
+                    let c = char_to_byte(text, c);
+                    opener_end < c && c <= end
+                }) {
+                    set_cursor(ui.ctx(), id, byte_to_char(text, opener_end));
+                }
+            }
+            self.dirty_since = Some(Instant::now());
+        }
     }
 
     /// Tangani satu karakter yang baru diketik. Mengembalikan karakter itu.

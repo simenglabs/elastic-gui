@@ -20,7 +20,7 @@ impl Block {
     }
 }
 
-fn request_line(line: &str) -> Option<(&str, &str)> {
+pub fn request_line(line: &str) -> Option<(&str, &str)> {
     if line.starts_with(char::is_whitespace) {
         return None;
     }
