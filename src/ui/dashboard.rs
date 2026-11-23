@@ -1836,6 +1836,9 @@ fn pie(
         .enumerate()
         .map(|(i, (k, v))| (k.clone(), v.max(0.0), PALETTE[i % PALETTE.len()]))
         .collect();
+    // Slice "Lainnya" dikenali dari posisinya, bukan teksnya: bucket asli bisa saja
+    // bernama "Other"/"Lainnya" dan tetap harus bisa diklik.
+    let buckets = slices.len();
     if other > 0.0 && panel.agg == Agg::Count {
         slices.push((t("Lainnya").into(), other, Color32::GRAY));
     }
@@ -1887,16 +1890,16 @@ fn pie(
             response
                 .clone()
                 .on_hover_text(format!("{k}: {} ({pct:.1}%)", fmt(panel.format, *v)));
-            if response.clicked() && k != t("Lainnya") {
+            if response.clicked() && i < buckets {
                 picked = Some(Filter::is(&panel.split, k, false));
             }
         }
         ui.vertical(|ui| {
-            for (k, v, color) in &slices {
+            for (i, (k, v, color)) in slices.iter().enumerate() {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("■").color(*color));
                     let pct = if total > 0.0 { v / total * 100.0 } else { 0.0 };
-                    if ui.link(format!("{k} · {pct:.1}%")).clicked() && k != t("Lainnya") {
+                    if ui.link(format!("{k} · {pct:.1}%")).clicked() && i < buckets {
                         picked = Some(Filter::is(&panel.split, k, false));
                     }
                 });

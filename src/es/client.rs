@@ -114,6 +114,16 @@ pub fn is_ndjson(path: &str) -> bool {
         .any(|s| s == "_bulk" || s == "_msearch")
 }
 
+/// PRF-02: node pertama yang dicoba. Default failover berurutan (selalu node pertama);
+/// round-robin hanya bila diaktifkan di profile.
+fn start_index(round_robin: bool, counter: &std::sync::atomic::AtomicUsize) -> usize {
+    if round_robin {
+        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    } else {
+        0
+    }
+}
+
 /// PRF-02: urutan percobaan node, melingkar mulai dari `start % len`.
 fn node_order(start: usize, len: usize) -> Vec<usize> {
     (0..len).map(|i| (start % len + i) % len).collect()
@@ -130,8 +140,11 @@ pub struct Conn {
     pub auth_kind: AuthKind,
     /// Jumlah request yang sedang berjalan (status bar).
     inflight: std::sync::atomic::AtomicUsize,
-    /// PRF-02: penghitung round-robin; tiap request mulai dari node berbeda.
+    /// PRF-02: aktif = tiap request mulai dari node berbeda (penghitung `next`).
+    round_robin: bool,
     next: std::sync::atomic::AtomicUsize,
+    /// Fingerprint dipin: kegagalan sertifikat jangan disarankan "lewati verifikasi".
+    pinned: bool,
 }
 
 /// Menurunkan penghitung request saat `send` selesai, apa pun hasilnya.
@@ -174,7 +187,8 @@ impl Conn {
             _ => return Err(t("Client cert dan private key harus diisi keduanya.").into()),
         };
         let fingerprint = profile.ca_fingerprint.trim();
-        if !fingerprint.is_empty() && !profile.insecure {
+        let pinned = !fingerprint.is_empty() && !profile.insecure;
+        if pinned {
             builder = builder.use_preconfigured_tls(super::tls::pinned_config(
                 fingerprint,
                 identity.as_deref(),
@@ -227,7 +241,9 @@ impl Conn {
             username: profile.username.clone(),
             auth_kind: profile.auth,
             inflight: Default::default(),
+            round_robin: profile.round_robin,
             next: Default::default(),
+            pinned,
         })
     }
 
@@ -271,8 +287,9 @@ impl Conn {
             "application/json"
         };
         let mut last_error = String::new();
-        // PRF-02: mulai dari node bergilir, lalu failover melingkar tiap node sekali.
-        let start = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // PRF-02: mulai dari node pertama (atau bergilir bila round-robin), lalu failover
+        // melingkar tiap node sekali.
+        let start = start_index(self.round_robin, &self.next);
         for idx in node_order(start, self.urls.len()) {
             let base = &self.urls[idx];
             let mut request = self
@@ -311,9 +328,9 @@ impl Conn {
                     });
                 }
                 Err(err) if err.is_connect() || err.is_timeout() => {
-                    last_error = describe_reqwest(&err);
+                    last_error = describe_reqwest(&err, self.pinned);
                 }
-                Err(err) => return Err(describe_reqwest(&err)),
+                Err(err) => return Err(describe_reqwest(&err, self.pinned)),
             }
         }
         Err(last_error)
@@ -345,14 +362,32 @@ pub fn cancel_opaque(conn: &Conn, opaque_id: &str) -> Result<usize, String> {
     Ok(ids.len())
 }
 
-fn describe_reqwest(err: &reqwest::Error) -> String {
+/// Saran "tambah CA / lewati verifikasi" hanya untuk rantai CA yang tidak dikenal. Bila
+/// fingerprint dipin, kegagalan bisa berarti MITM, jadi jangan sarankan mematikan verifikasi.
+fn wants_ca_hint(text: &str, pinned: bool) -> bool {
+    // Pesan pin-mismatch (es/tls.rs) memuat "fingerprint" di kedua bahasa.
+    if pinned || text.contains("fingerprint") {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    [
+        "unknownissuer",
+        "invalid peer certificate",
+        "self signed",
+        "self-signed",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn describe_reqwest(err: &reqwest::Error, pinned: bool) -> String {
     let mut text = err.to_string();
     let mut source = std::error::Error::source(err);
     while let Some(cause) = source {
         text.push_str(&format!(": {cause}"));
         source = cause.source();
     }
-    if text.contains("certificate") || text.contains("UnknownIssuer") {
+    if wants_ca_hint(&text, pinned) {
         text.push('\n');
         text.push_str(&tf(
             "Sertifikat tidak bisa diverifikasi. Tambahkan CA cert di profile, atau aktifkan \"{0}\".",
@@ -448,6 +483,50 @@ mod tests {
         let conn = Arc::new(Conn::new(&Profile::default(), None).unwrap());
         let opened = Source::Ready(conn.clone()).open().unwrap();
         assert!(Arc::ptr_eq(&conn, &opened));
+    }
+
+    #[test]
+    fn start_index_default_selalu_node_pertama() {
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        for _ in 0..3 {
+            assert_eq!(start_index(false, &counter), 0);
+        }
+        assert_eq!(node_order(start_index(false, &counter), 3), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn start_index_round_robin_bergilir() {
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        let starts: Vec<usize> = (0..4).map(|_| start_index(true, &counter)).collect();
+        assert_eq!(starts, vec![0, 1, 2, 3]);
+        assert_eq!(node_order(starts[1], 3), vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn round_robin_default_mati() {
+        assert!(!Profile::default().round_robin);
+        let old: Profile = serde_json::from_str(r#"{"urls":["http://a:9200"]}"#).unwrap();
+        assert!(!old.round_robin);
+    }
+
+    #[test]
+    fn saran_ca_hanya_untuk_rantai_ca() {
+        let unknown = "error sending request: client error (Connect): invalid peer certificate: UnknownIssuer";
+        assert!(wants_ca_hint(unknown, false));
+        assert!(wants_ca_hint(
+            "self-signed certificate in certificate chain",
+            false
+        ));
+        // Dipin: walau CA tidak dikenal, jangan sarankan mematikan verifikasi.
+        assert!(!wants_ca_hint(unknown, true));
+        // Teks pin-mismatch kedua bahasa (dibangun langsung, bahasa global tidak diubah).
+        let id = "error sending request: unexpected error: fingerprint sertifikat server tidak cocok dengan yang dipin di profile";
+        let en = "error sending request: unexpected error: the server certificate fingerprint does not match the one pinned in the profile";
+        for text in [id, en] {
+            assert!(!wants_ca_hint(text, false), "{text}");
+            assert!(!wants_ca_hint(text, true), "{text}");
+        }
+        assert!(!wants_ca_hint("connection refused", false));
     }
 
     #[test]

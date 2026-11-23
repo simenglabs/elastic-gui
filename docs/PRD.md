@@ -13,7 +13,7 @@ Bagian ini menggantikan klaim "P0 selesai" sebelumnya, yang terlalu luas. Pernya
 
 **Terimplementasi di kode (lulus `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`):**
 
-- Cluster: deteksi capability dan privilege per index/template (PRF-11, PRF-12), PKI/mTLS dan Cloud ID (PRF-04), pin fingerprint TLS (PRF-06), HTTP proxy (PRF-08), tab cluster + modul (PRF-15), ekspor/impor profile tanpa secret (PRF-16), duplikat profile (PRF-17), failover node dengan round-robin (PRF-02).
+- Cluster: deteksi capability dan privilege per index/template (PRF-11, PRF-12), PKI/mTLS dan Cloud ID (PRF-04), pin fingerprint TLS (PRF-06), HTTP proxy (PRF-08), tab cluster + modul (PRF-15), ekspor/impor profile tanpa secret (PRF-16), duplikat profile (PRF-17), failover node berurutan dengan opsi round-robin per profile (PRF-02).
 - Dev Tools: lint (CON-06), variabel `${X}` (CON-07), saran live (CON-23), saran nilai `_terms_enum` (CON-29), link dokumentasi (CON-30), cancel task via `X-Opaque-Id` (CON-42), impor cURL (CON-62), snippet bawaan (CON-63), cluster target per tab (CON-64), serta tab, history, dan salin cURL. Folding JSON di editor (CON-09): penanda ▾/▸ di gutter, hanya visual (teks tidak berubah).
 - Discover: data view per pola (DIS-03), `remote:*` (DIS-07), ES|QL (DIS-12), KQL (DIS-13), autocomplete `_terms_enum` (DIS-14), history query (DIS-15), filter sebagai DSL + pin (DIS-18), breakdown histogram (DIS-23), urutan kolom bisa diubah (DIS-31: ◀▶ di header tabel, ↑↓ di sidebar), preview pola `_resolve` (DIS-01), sort `.keyword` otomatis (DIS-32), total akurat (DIS-34), highlight (DIS-35), dokumen sekitar (DIS-38), edit/hapus dokumen dengan `if_seq_no` (DIS-39), penanda konflik tipe (DIS-41), top values akurat dengan statistik numerik min/max/avg/sum/count (DIS-43), tree field (DIS-44), saved search (DIS-50), ekspor CSV (DIS-51), async search di atas 30 hari (DIS-54).
 - Dashboard: tabel dengan sort dan ekspor CSV (DSH-07), panel pencarian tersimpan (DSH-10), brush time series dan klik series untuk memfilter (DSH-14), Inspect (DSH-17), impor/ekspor (DSH-18).
@@ -155,7 +155,7 @@ Prioritas: **P0** = wajib di MVP, **P1** = rilis berikutnya, **P2** = nanti.
 | ID | Kebutuhan | Prioritas |
 |---|---|---|
 | PRF-01 | CRUD profile: nama, warna, tag environment (`prod`/`staging`/`dev`/custom) | P0 |
-| PRF-02 | Satu atau lebih URL node (failover berurutan), termasuk path prefix untuk reverse proxy (`https://gw/es/`) | P0 |
+| PRF-02 | Satu atau lebih URL node (failover berurutan; opsional round-robin per profile), termasuk path prefix untuk reverse proxy (`https://gw/es/`) | P0 |
 | PRF-03 | Auth: None, Basic (user/password), API Key (format `id:key` atau encoded), Bearer token | P0 |
 | PRF-04 | Auth PKI (client cert + key), Cloud ID | P1 |
 | PRF-05 | TLS: CA cert custom (file PEM), opsi skip verify dengan banner peringatan permanen | P0 |

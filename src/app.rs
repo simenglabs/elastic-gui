@@ -101,6 +101,11 @@ impl Workspace {
     fn tick(&mut self, ctx: &egui::Context) {
         if let Some(conn) = poll(&mut self.conn_pending) {
             self.conn = Some(conn.map(Arc::new));
+        } else if self.conn.is_none() && self.conn_pending.is_none() {
+            // Thread `Conn::connect` panic: slot kosong tanpa hasil; jangan loading selamanya.
+            self.conn = Some(Err(
+                t("Gagal menyiapkan koneksi (thread latar berhenti).").into()
+            ));
         }
         let Some(Ok(conn)) = &self.conn else { return };
         if self.info.is_none() && self.info_pending.is_none() {
@@ -529,6 +534,7 @@ impl DesktopApp {
                     } else {
                         env
                     });
+                    let conn_err = ws.and_then(|w| w.conn.as_ref()?.as_ref().err());
                     match ws.and_then(|w| w.info.as_ref()) {
                         Some(Ok(info)) => {
                             let user = info
@@ -542,9 +548,15 @@ impl DesktopApp {
                             ui.colored_label(ui.visuals().error_fg_color, t("Tidak terhubung"))
                                 .on_hover_text(err);
                         }
-                        None => {
-                            ui.spinner();
-                        }
+                        None => match conn_err {
+                            Some(err) => {
+                                ui.colored_label(ui.visuals().error_fg_color, t("Tidak terhubung"))
+                                    .on_hover_text(err);
+                            }
+                            None => {
+                                ui.spinner();
+                            }
+                        },
                     }
                     if profile.read_only {
                         ui.label(
@@ -741,6 +753,10 @@ impl eframe::App for DesktopApp {
 
 /// X-05: terjemahan English untuk teks di file ini.
 pub const EN: &[(&str, &str)] = &[
+    (
+        "Gagal menyiapkan koneksi (thread latar berhenti).",
+        "Failed to prepare the connection (background thread stopped).",
+    ),
     (
         "Simpan cluster + modul ini sebagai tab",
         "Save this cluster + module as a tab",

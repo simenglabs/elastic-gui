@@ -103,9 +103,12 @@ struct Detail {
     settings: Vec<(String, String)>,
     /// IDX-11: eksplisit + default (flag true = default); default kosong bila tidak diminta.
     settings_all: Vec<(String, String, bool)>,
-    /// IDX-11: settings bersarang mentah (`settings`, plus `defaults` bila diminta).
-    settings_raw: Value,
+    /// IDX-11: settings bersarang mentah (`settings`, plus `defaults` bila diminta), sudah
+    /// diformat sekali saat dimuat supaya tidak diserialisasi ulang tiap frame.
+    settings_text: String,
     mappings: Value,
+    /// IDX-13: `mappings` terformat, dihitung sekali saat dimuat.
+    mappings_text: String,
     privs: Privs,
 }
 
@@ -964,12 +967,16 @@ impl Indices {
                             reload_settings = true;
                         }
                         if self.settings_json && ui.button(t("Salin")).clicked() {
-                            ui.ctx().copy_text(pretty(&detail.settings_raw));
+                            ui.ctx().copy_text(detail.settings_text.clone());
                         }
                     });
                     if self.settings_json {
-                        let text = pretty(&detail.settings_raw);
-                        widgets::code_view(ui, &text, widgets::Lang::Json, &mut self.highlighter);
+                        widgets::code_view(
+                            ui,
+                            &detail.settings_text,
+                            widgets::Lang::Json,
+                            &mut self.highlighter,
+                        );
                     } else {
                         egui::Grid::new("settings_grid")
                             .striped(true)
@@ -1003,12 +1010,16 @@ impl Indices {
                         ui.selectable_value(&mut self.mappings_json, false, "Tree");
                         ui.selectable_value(&mut self.mappings_json, true, "JSON");
                         if self.mappings_json && ui.button(t("Salin")).clicked() {
-                            ui.ctx().copy_text(pretty(&detail.mappings));
+                            ui.ctx().copy_text(detail.mappings_text.clone());
                         }
                     });
                     if self.mappings_json {
-                        let text = pretty(&detail.mappings);
-                        widgets::code_view(ui, &text, widgets::Lang::Json, &mut self.highlighter);
+                        widgets::code_view(
+                            ui,
+                            &detail.mappings_text,
+                            widgets::Lang::Json,
+                            &mut self.highlighter,
+                        );
                     } else {
                         widgets::json_tree(
                             ui,
@@ -2174,7 +2185,8 @@ fn load_detail(conn: &Conn, name: &str, include_defaults: bool) -> Result<Detail
         stats,
         settings: flat,
         settings_all,
-        settings_raw,
+        settings_text: pretty(&settings_raw),
+        mappings_text: pretty(&mappings),
         mappings,
         privs: load_privs(conn, name),
     })
@@ -2672,6 +2684,8 @@ mod tests {
                 .any(|(k, _)| k == "index.number_of_shards")
         );
         assert!(detail.mappings.is_object());
+        assert_eq!(detail.mappings_text, pretty(&detail.mappings));
+        assert!(detail.settings_text.contains("\"settings\""));
         let with_defaults = load_detail(&conn, &row.name, true).unwrap();
         assert!(with_defaults.settings_all.iter().any(|(_, _, d)| *d));
         assert!(detail.stats["total"].is_object());

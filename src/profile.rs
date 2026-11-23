@@ -63,6 +63,9 @@ pub struct Profile {
     pub env: Env,
     /// Satu atau lebih URL node; dicoba berurutan saat koneksi gagal.
     pub urls: Vec<String>,
+    /// PRF-02: opsional, bagi beban antar node dengan titik mulai bergilir alih-alih
+    /// selalu mulai dari node pertama.
+    pub round_robin: bool,
     pub auth: AuthKind,
     pub username: String,
     /// File PEM CA tambahan (kosong = pakai CA sistem).
@@ -92,6 +95,7 @@ impl Default for Profile {
             name: t("Cluster baru").into(),
             env: Env::Dev,
             urls: vec!["http://localhost:9200".into()],
+            round_robin: false,
             auth: AuthKind::None,
             username: String::new(),
             ca_cert_path: String::new(),
@@ -241,8 +245,12 @@ pub mod secret {
             return hit;
         }
         let value = backend();
-        remember(cache, profile_id, value.clone());
-        value
+        // Pembacaan keychain bisa lama (dialog izin macOS); bila `set`/`delete` menulis
+        // selama itu, nilai mereka lebih baru dan tidak boleh tertimpa hasil baca ini.
+        match cache.lock() {
+            Ok(mut map) => map.entry(profile_id.to_owned()).or_insert(value).clone(),
+            Err(_) => value,
+        }
     }
 
     fn remember(cache: &Mutex<Cache>, profile_id: &str, value: Option<String>) {
@@ -342,6 +350,35 @@ pub mod secret {
             remember(&cache, "a", None);
             assert_eq!(lookup(&cache, "a", counting(&calls, Some("lama"))), None);
             assert_eq!(calls.get(), 1);
+        }
+
+        #[test]
+        fn set_selama_baca_keychain_tidak_tertimpa() {
+            let cache = Mutex::default();
+            // Backend lambat: `set` (lewat `remember`) terjadi sebelum bacaan lama selesai.
+            let got = lookup(&cache, "a", || {
+                remember(&cache, "a", Some("baru".into()));
+                Some("lama".into())
+            });
+            assert_eq!(got.as_deref(), Some("baru"));
+            assert_eq!(
+                lookup(&cache, "a", || panic!("tidak boleh ke keychain")).as_deref(),
+                Some("baru")
+            );
+        }
+
+        #[test]
+        fn delete_selama_baca_keychain_tidak_dibatalkan() {
+            let cache = Mutex::default();
+            let got = lookup(&cache, "a", || {
+                remember(&cache, "a", None);
+                Some("lama".into())
+            });
+            assert_eq!(got, None);
+            assert_eq!(
+                lookup(&cache, "a", || panic!("tidak boleh ke keychain")),
+                None
+            );
         }
 
         #[test]

@@ -213,6 +213,12 @@ impl Profiles {
                     {
                         draft.urls.push(String::new());
                     }
+                    if draft.urls.len() > 1 {
+                        ui.checkbox(
+                            &mut draft.round_robin,
+                            t("Bagi beban antar node (round-robin)"),
+                        );
+                    }
                 });
                 ui.end_row();
 
@@ -606,6 +612,10 @@ pub const EN: &[(&str, &str)] = &[
     ("Nama", "Name"),
     ("URL node", "Node URLs"),
     ("Node cadangan untuk failover", "Backup node for failover"),
+    (
+        "Bagi beban antar node (round-robin)",
+        "Spread load across nodes (round-robin)",
+    ),
     ("Autentikasi", "Authentication"),
     (
         "•••••• (tersimpan, isi untuk mengganti)",
