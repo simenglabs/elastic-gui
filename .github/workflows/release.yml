@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Validate release version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Match tag to Cargo version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+          expected = f'v{version}'
+          if os.environ['RELEASE_TAG'] != expected:
+              raise SystemExit(f'Release tag must match Cargo.toml: {expected}')
+          PY
+
+  macos:
+    needs: version
+    uses: ./.github/workflows/build-macos.yml
+
+  publish:
+    name: Publish GitHub Release
+    needs: macos
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: dmg-*
+          merge-multiple: true
+          path: dist
+      - name: Verify downloaded assets
+        working-directory: dist
+        run: |
+          test -f Elastic-GUI-macos-arm64.dmg
+          test -f Elastic-GUI-macos-x86_64.dmg
+          sha256sum --check ./*.sha256
+      - name: Publish release
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Download macOS
+
+          - **Apple Silicon (M1/M2/M3/M4 dan lebih baru):** `Elastic-GUI-macos-arm64.dmg`
+          - **Intel:** `Elastic-GUI-macos-x86_64.dmg`
+          - Minimum macOS 13. Buka DMG, lalu seret **Elastic GUI.app** ke **Applications**.
+
+          Paket memakai tanda tangan ad-hoc dan belum dinotarisasi Apple. macOS dapat meminta persetujuan di **System Settings → Privacy & Security → Open Anyway** saat pertama dibuka.
+
+          File `.sha256` disertakan untuk memverifikasi integritas unduhan.
+          EOF
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists; refusing to overwrite published assets."
+            exit 1
+          fi
+          release_flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+          gh release create "$RELEASE_TAG" dist/*.dmg dist/*.sha256 \
+            --verify-tag --title "Elastic GUI $RELEASE_TAG" \
+            --generate-notes --notes-file release-notes.md "${release_flags[@]}"
+

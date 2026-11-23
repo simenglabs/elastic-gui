@@ -1,0 +1,59 @@
+name: Build macOS DMG
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            arch: x86_64
+            target: x86_64-apple-darwin
+    env:
+      CARGO_TERM_COLOR: always
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          key: macos-${{ matrix.arch }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test --locked
+      - name: Build release binary
+        run: cargo build --locked --release
+      - name: Package and verify DMG
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: python3 tools/package_macos.py --target "$BUILD_TARGET"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+

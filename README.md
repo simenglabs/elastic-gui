@@ -1,6 +1,19 @@
 # Elastic GUI
 
+[![CI](https://github.com/simenglabs/elastic-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/simenglabs/elastic-gui/actions/workflows/ci.yml)
+
 Aplikasi desktop native untuk Elasticsearch (Rust + [egui/eframe](https://docs.rs/eframe/0.37.0/eframe/)). Mendukung banyak cluster sekaligus. Spesifikasi lengkap ada di [`docs/PRD.md`](docs/PRD.md).
+
+## Download macOS
+
+| Mac | Installer terbaru |
+| --- | --- |
+| Apple Silicon (M1/M2/M3/M4 dan lebih baru) | [Download DMG — Apple Silicon](https://github.com/simenglabs/elastic-gui/releases/latest/download/Elastic-GUI-macos-arm64.dmg) |
+| Intel | [Download DMG — Intel](https://github.com/simenglabs/elastic-gui/releases/latest/download/Elastic-GUI-macos-x86_64.dmg) |
+
+Minimum **macOS 13**. Buka DMG, lalu seret **Elastic GUI.app** ke **Applications**. Semua versi dan file checksum tersedia di [GitHub Releases](https://github.com/simenglabs/elastic-gui/releases/latest).
+
+Paket saat ini memakai tanda tangan **ad-hoc** dan belum [dinotarisasi Apple](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution/). Saat pertama dibuka, macOS dapat meminta persetujuan melalui **System Settings → Privacy & Security → Open Anyway**.
 
 Modul:
 
@@ -90,7 +103,29 @@ ELASTIC_URL=... ELASTIC_USER=... ELASTIC_PASSWORD=... LIVE_PATTERN='logs-*' \
   LIVE_FINGERPRINT='AB:CD:…' cargo test -- --ignored --test-threads=1
 ```
 
-Hasil build berada di `target/release/elastic-gui` (`elastic-gui.exe` pada Windows). Build menghasilkan executable untuk OS tempat perintah dijalankan; installer dan app bundle belum dikonfigurasi.
+Hasil build berada di `target/release/elastic-gui` (`elastic-gui.exe` pada Windows). Build menghasilkan executable untuk OS tempat perintah dijalankan.
+
+### Build DMG di macOS
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=13.0 cargo build --locked --release
+python3 tools/package_macos.py --target aarch64-apple-darwin
+```
+
+Untuk Mac Intel, gunakan `--target x86_64-apple-darwin`. Jalankan pada Mac dengan arsitektur yang sesuai. Script memeriksa arsitektur executable, membuat app bundle, menandatanganinya secara ad-hoc, dan memverifikasi DMG. Hasilnya berada di `dist/`, beserta file `.sha256`.
+
+### CI dan release
+
+- Push ke `main`, pull request ke `main`, atau **Actions → CI → Run workflow** menjalankan format, Clippy, unit test, build release, dan packaging DMG pada Apple Silicon serta Intel. DMG tersedia sebagai artifact selama 14 hari.
+- Push tag `v*` menjalankan validasi versi, pemeriksaan dan build yang sama, lalu menerbitkan kedua DMG serta checksum ke GitHub Releases. Tag harus sama dengan versi di `Cargo.toml`.
+- Nama asset tetap sehingga tautan download di atas otomatis mengikuti release stabil terbaru. Tag versi prerelease seperti `v0.2.0-beta.1` tidak diterbitkan sebagai release stabil terbaru.
+
+Contoh menerbitkan versi setelah memperbarui `Cargo.toml` dan `Cargo.lock`, lalu commit dan push ke `main`:
+
+```sh
+git tag -a v0.1.0 -m "Release v0.1.0"
+git push origin v0.1.0
+```
 
 ## Pengukuran performa
 
