@@ -2058,10 +2058,10 @@ fn load_detail(conn: &Conn, name: &str) -> Result<Detail, String> {
 /// IDX-38: validasi jumlah shard untuk shrink/split.
 fn resize_shard_error(op: &str, n: u64, pri: u64) -> Option<String> {
     match op {
-        "_shrink" if n >= pri || n == 0 || pri % n != 0 => Some(format!(
+        "_shrink" if n >= pri || n == 0 || !pri.is_multiple_of(n) => Some(format!(
             "Shrink: jumlah shard harus faktor dari {pri} dan lebih kecil."
         )),
-        "_split" if n <= pri || n % pri.max(1) != 0 => Some(format!(
+        "_split" if n <= pri || !n.is_multiple_of(pri.max(1)) => Some(format!(
             "Split: jumlah shard harus kelipatan {pri} dan lebih besar."
         )),
         _ => None,
