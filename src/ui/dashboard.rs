@@ -1506,7 +1506,7 @@ fn render(ui: &mut egui::Ui, i: usize, panel: &Panel, data: &Data) -> Option<Eve
                     let mut stacked: Vec<BarChart> = Vec::new();
                     for (si, (name, points)) in series.iter().enumerate() {
                         let color = PALETTE[si % PALETTE.len()];
-                        let item = egui_plot::ItemId::new(("series", i, si));
+                        let item = series_source(i, si);
                         match panel.style {
                             Style::Bar => {
                                 let bars = points
@@ -1643,11 +1643,15 @@ fn brush(ui: &mut egui::Ui, i: usize, response: &egui_plot::PlotResponse<()>) ->
 
 /// DSH-14: pemetaan id item plot -> nama seri (id dibuat per indeks agar nama
 /// kembar tidak bertabrakan).
+fn series_source(i: usize, si: usize) -> (&'static str, usize, usize) {
+    ("series", i, si)
+}
+
 fn series_ids(i: usize, series: &[(String, Vec<[f64; 2]>)]) -> Vec<(egui_plot::ItemId, String)> {
     series
         .iter()
         .enumerate()
-        .map(|(si, (name, _))| (egui_plot::ItemId::new(("series", i, si)), name.clone()))
+        .map(|(si, (name, _))| (egui_plot::ItemId::new(series_source(i, si)), name.clone()))
         .collect()
 }
 
@@ -1900,6 +1904,12 @@ mod tests {
         assert_eq!(ids[1].1, "b");
         assert_ne!(ids[0].0, ids[2].0);
         assert_ne!(ids[0].0, series_ids(4, &series)[0].0);
+        // Id yang disimpan egui_plot lewat `.id(source)` harus cocok dengan peta.
+        use egui_plot::PlotItem;
+        let line = Line::new("a", vec![[0.0, 0.0]]).id(series_source(3, 1));
+        let chart = BarChart::new("a", vec![Bar::new(0.0, 1.0)]).id(series_source(3, 1));
+        assert_eq!(PlotItem::id(&line), ids[1].0);
+        assert_eq!(PlotItem::id(&chart), ids[1].0);
     }
 
     #[test]
