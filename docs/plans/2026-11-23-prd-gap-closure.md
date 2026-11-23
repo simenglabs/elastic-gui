@@ -152,3 +152,16 @@ Sama seperti Task 9 untuk modul sisanya. Setelah task ini, `grep` literal string
 
 - Perbarui bagian "Status implementasi" PRD: DIS-31, IDX-11, IDX-13, DIS-43, DSH-14, CON-09, X-05, PRF-02 selesai; hapus klaim yang tidak akurat; cantumkan hasil pengukuran NFR bila tersedia di laporan Task 7 (berikan angka dari `docs/plans/nfr-results.md` bila ada, jika tidak tulis "diukur lewat perintah di README").
 - README: sebut pemilih bahasa ID/EN dan folding Console.
+
+## Task 14: Secret keychain di luar thread UI
+
+**File:** `src/profile.rs` (modul `secret`), `src/app.rs`, `src/ui/profiles.rs`, `src/ui/dashboard.rs`, `src/ui/console/mod.rs`
+
+Ditemukan di Task 7: `secret::get` membaca keychain OS (di macOS bisa memunculkan dialog izin dan memblokir) dan saat ini dipanggil di thread UI — `Workspace::new` (app.rs, sebelum frame pertama cluster aktif), editor profile **setiap frame** (`has_secret` di profiles.rs), serta pembuatan koneksi target di Dashboard dan Console. Global Constraints: thread UI tidak boleh blok.
+
+Kebutuhan:
+- `secret::get` tetap ada untuk dipakai di thread latar. Tambahkan cache negatif di sesi (entri "tidak ada di keychain" juga di-cache) supaya pemanggilan berulang untuk profile tanpa secret tidak menyentuh keychain lagi; `secret::set`/`delete` memperbarui cache.
+- `Workspace::new` tidak lagi memanggil keychain di thread UI: koneksi dibangun di `Pending` (thread latar). Selama belum siap, modul menampilkan status "Menyiapkan koneksi…" (spinner), bukan blok. Error pembuatan koneksi tetap ditampilkan seperti sekarang.
+- Editor profile: status "secret tersimpan" dimuat sekali per profile terpilih di thread latar (atau dari cache sesi), bukan dipanggil tiap frame. Tombol Test koneksi/Simpan sudah memakai thread latar untuk test; pastikan jalur Simpan tidak membaca keychain di thread UI kecuali lewat cache.
+- Dashboard (panel cluster lain) dan Console (target per tab): pembuatan `Conn` untuk profile lain dipindah ke dalam thread latar yang sudah menjalankan request (bukan sebelum `Pending::spawn`).
+- Unit test untuk cache sesi (positif, negatif, invalidasi oleh `set`/`delete`) tanpa menyentuh keychain sungguhan — pisahkan logika cache dari backend keychain (mis. fungsi generik atas trait/closure backend).
