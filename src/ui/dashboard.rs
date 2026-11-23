@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use super::{Ctx, Nav};
 use crate::es::Conn;
 use crate::es::catalog::Field;
+use crate::es::client::Source;
 use crate::es::query::{self, Filter, QueryMode, TimeBounds};
 use crate::task::{Pending, poll};
 use crate::ui::discover::{SAVED_FILE, SavedSearch};
@@ -1051,7 +1052,8 @@ impl Dashboard {
             query::auto_interval(b.to - b.from, 60)
         });
         // DSH-19: koneksi per profile sumber panel; indeks 0 = cluster aktif.
-        let mut conns: Vec<(Option<String>, Arc<Conn>)> = vec![(None, cx.conn.clone())];
+        // Conn profile lain dibangun di thread latar (membaca keychain OS).
+        let mut conns: Vec<(Option<String>, Source)> = vec![(None, Source::Ready(cx.conn.clone()))];
         let mut reqs: Vec<Req> = Vec::new();
         for panel in &dash.panels {
             let conn = match panel.profile.as_ref().filter(|id| **id != cx.profile.id) {
@@ -1063,9 +1065,8 @@ impl Dashboard {
                         .iter()
                         .find(|p| &p.id == id)
                         .ok_or_else(|| "Profile sumber panel sudah dihapus.".to_string())
-                        .and_then(|p| Conn::new(p, crate::profile::secret::get(id).as_deref()))
-                        .map(|c| {
-                            conns.push((Some(id.clone()), Arc::new(c)));
+                        .map(|p| {
+                            conns.push((Some(id.clone()), Source::Profile(Box::new(p.clone()))));
                             conns.len() - 1
                         }),
                 },
@@ -1105,8 +1106,9 @@ impl Dashboard {
             .iter()
             .map(|s| (s.name.clone(), s.time_field.clone()))
             .collect();
-        let conns: Vec<Arc<Conn>> = conns.into_iter().map(|(_, c)| c).collect();
+        let sources: Vec<Source> = conns.into_iter().map(|(_, c)| c).collect();
         self.pending = Some(Pending::spawn(ctx, move || {
+            let conns: Vec<Result<Arc<Conn>, String>> = sources.iter().map(Source::open).collect();
             let mut out: Vec<Option<Data>> = (0..reqs.len()).map(|_| None).collect();
             // Satu `_msearch` per koneksi.
             for (ci, conn) in conns.iter().enumerate() {
@@ -1128,7 +1130,8 @@ impl Dashboard {
                     lines.push_str(&format!("{}\n{}\n", json!({"index": target}), body));
                 }
                 let responses = conn
-                    .send("POST", "/_msearch", Some(&lines))
+                    .clone()
+                    .and_then(|conn| conn.send("POST", "/_msearch", Some(&lines)))
                     .and_then(|r| r.json())
                     .map(|v| v["responses"].as_array().cloned().unwrap_or_default());
                 for (k, (i, _, _)) in batch.iter().enumerate() {
@@ -1156,7 +1159,9 @@ impl Dashboard {
                     Req::Static(d) => d,
                     Req::Search { .. } => data.unwrap_or(Data::Error("Response kosong".into())),
                     Req::Esql { conn, body } => {
-                        match conns[conn].json("POST", "/_query?format=json", Some(&body)) {
+                        let conn = conns[conn].clone();
+                        match conn.and_then(|c| c.json("POST", "/_query?format=json", Some(&body)))
+                        {
                             Ok(v) => Data::Esql(
                                 v["columns"]
                                     .as_array()

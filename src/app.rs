@@ -55,7 +55,9 @@ struct ClusterInfo {
 
 /// State semua modul untuk satu profile. Pindah cluster tidak membuang state.
 struct Workspace {
-    conn: Result<Arc<Conn>, String>,
+    /// `None` selama koneksi masih disiapkan di thread latar (membaca keychain OS).
+    conn: Option<Result<Arc<Conn>, String>>,
+    conn_pending: Option<Pending<Result<Conn, String>>>,
     info: Option<Result<ClusterInfo, String>>,
     info_pending: Option<Pending<Result<ClusterInfo, String>>>,
     health: Option<Result<String, String>>,
@@ -69,9 +71,11 @@ struct Workspace {
 }
 
 impl Workspace {
-    fn new(profile: &Profile) -> Self {
+    fn new(ctx: &egui::Context, profile: &Profile) -> Self {
+        let profile = profile.clone();
         Self {
-            conn: Conn::new(profile, secret::get(&profile.id).as_deref()).map(Arc::new),
+            conn: None,
+            conn_pending: Some(Pending::spawn(ctx, move || Conn::connect(&profile))),
             info: None,
             info_pending: None,
             health: None,
@@ -86,7 +90,10 @@ impl Workspace {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
-        let Ok(conn) = &self.conn else { return };
+        if let Some(conn) = poll(&mut self.conn_pending) {
+            self.conn = Some(conn.map(Arc::new));
+        }
+        let Some(Ok(conn)) = &self.conn else { return };
         if self.info.is_none() && self.info_pending.is_none() {
             let conn = conn.clone();
             self.info_pending = Some(Pending::spawn(ctx, move || load_info(&conn)));
@@ -310,7 +317,7 @@ impl DesktopApp {
                     ui.small(RichText::new("· read-only").color(ui.visuals().warn_fg_color));
                 }
                 let running = ws
-                    .and_then(|w| w.conn.as_ref().ok())
+                    .and_then(|w| w.conn.as_ref()?.as_ref().ok())
                     .map_or(0, |c| c.inflight());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if running > 0 {
@@ -345,7 +352,7 @@ impl DesktopApp {
             .active
             .as_ref()
             .and_then(|id| self.workspaces.get_mut(id))
-            && let Ok(conn) = ws.conn.clone()
+            && let Some(Ok(conn)) = ws.conn.clone()
         {
             for t in ws
                 .catalog
@@ -620,13 +627,22 @@ impl eframe::App for DesktopApp {
             .workspaces
             .entry(profile.id.clone())
             .or_insert_with(|| {
-                let mut ws = Workspace::new(&profile);
+                let mut ws = Workspace::new(&ctx, &profile);
                 ws.tick(&ctx);
                 ws
             });
         let conn = match &ws.conn {
-            Ok(conn) => conn.clone(),
-            Err(err) => {
+            Some(Ok(conn)) => conn.clone(),
+            None => {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Menyiapkan koneksi…");
+                    });
+                });
+                return;
+            }
+            Some(Err(err)) => {
                 let err = err.clone();
                 egui::CentralPanel::default().show(ui, |ui| {
                     crate::widgets::error_box(ui, &format!("Profile tidak bisa dipakai: {err}"));

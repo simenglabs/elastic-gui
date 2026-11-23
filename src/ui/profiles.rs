@@ -22,6 +22,9 @@ pub struct Profiles {
     secret_input: String,
     test: Option<Pending<Result<String, String>>>,
     test_result: Option<Result<String, String>>,
+    /// Secret tersimpan untuk profile terpilih (id, nilai), dimuat sekali di thread latar.
+    stored: Option<(String, Option<String>)>,
+    stored_pending: Option<Pending<(String, Option<String>)>>,
     message: Option<Result<String, String>>,
     confirm_delete: bool,
     confirm_typed: String,
@@ -39,6 +42,31 @@ impl Profiles {
         self.secret_input.clear();
         self.test_result = None;
         self.message = None;
+    }
+
+    /// Secret tersimpan untuk draft: dari cache sesi, atau dimuat dari keychain OS di thread
+    /// latar (bisa memblokir). `None` selama masih dimuat.
+    fn stored_secret(&mut self, ctx: &egui::Context) -> Option<Option<String>> {
+        let id = &self.draft.as_ref()?.id;
+        if let Some(loaded) = poll(&mut self.stored_pending) {
+            self.stored = Some(loaded);
+        }
+        match &self.stored {
+            Some((stored_id, value)) if stored_id == id => return Some(value.clone()),
+            _ => {}
+        }
+        if let Some(value) = secret::cached(id) {
+            self.stored = Some((id.clone(), value.clone()));
+            return Some(value);
+        }
+        if self.stored_pending.is_none() {
+            let id = id.clone();
+            self.stored_pending = Some(Pending::spawn(ctx, move || {
+                let value = secret::get(&id);
+                (id, value)
+            }));
+        }
+        None
     }
 
     pub fn ui(
@@ -122,6 +150,7 @@ impl Profiles {
         store: &Store,
         events: &mut Vec<Event>,
     ) {
+        let stored = self.stored_secret(ui.ctx());
         let Some(draft) = &mut self.draft else {
             ui.weak("Pilih profile di kiri atau buat profile baru.");
             return;
@@ -206,11 +235,10 @@ impl Profiles {
                         _ => "Token",
                     };
                     ui.label(label);
-                    let has_secret = secret::get(&draft.id).is_some();
-                    let hint = if has_secret {
-                        "•••••• (tersimpan, isi untuk mengganti)"
-                    } else {
-                        ""
+                    let hint = match &stored {
+                        Some(Some(_)) => "•••••• (tersimpan, isi untuk mengganti)",
+                        Some(None) => "",
+                        None => "memuat secret tersimpan…",
                     };
                     ui.add(
                         egui::TextEdit::singleline(&mut self.secret_input)
@@ -352,8 +380,9 @@ impl Profiles {
             widgets::warn_box(ui, &err);
         }
         ui.add_space(10.0);
+        let loading = stored.is_none() && self.secret_input.is_empty();
         let secret_value = if self.secret_input.is_empty() {
-            secret::get(&draft.id)
+            stored.flatten()
         } else {
             Some(self.secret_input.clone())
         };
@@ -361,7 +390,10 @@ impl Profiles {
         ui.horizontal(|ui| {
             if self.test.is_some() {
                 ui.spinner();
-            } else if ui.button("Test koneksi").clicked() {
+            } else if ui
+                .add_enabled(!loading, egui::Button::new("Test koneksi"))
+                .clicked()
+            {
                 let profile = draft.clone();
                 let secret_value = secret_value.clone();
                 self.test = Some(Pending::spawn(ui.ctx(), move || {
@@ -384,13 +416,19 @@ impl Profiles {
                 {
                     self.secret_input.clear();
                 }
+                // Dimuat ulang dari cache sesi yang sudah diperbarui `secret::set`.
+                self.stored = None;
                 self.selected = Some(draft.id.clone());
                 events.push(Event::Changed(draft.id.clone()));
             }
             if !is_new && ui.button("Gunakan").clicked() {
                 events.push(Event::Activate(draft.id.clone()));
             }
-            if !is_new && ui.button("Duplikat").clicked() {
+            if !is_new
+                && ui
+                    .add_enabled(!loading, egui::Button::new("Duplikat"))
+                    .clicked()
+            {
                 let mut copy = draft.clone();
                 copy.id = Profile::default().id;
                 copy.name = format!("{} (salinan)", copy.name);

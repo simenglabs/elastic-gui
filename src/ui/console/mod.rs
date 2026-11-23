@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::Ctx;
-use crate::es::client::{Response, is_ndjson};
+use crate::es::client::{Response, Source, is_ndjson};
 use crate::es::{Conn, spec};
 use crate::profile::AuthKind;
 use crate::task::{Pending, poll};
@@ -114,7 +114,7 @@ pub struct Console {
     vars: Vec<(String, String)>,
     vars_open: bool,
     /// Koneksi + X-Opaque-Id request yang sedang berjalan (CON-42).
-    running: Option<(Arc<Conn>, String)>,
+    running: Option<(Source, String)>,
     /// CON-29: cache `_terms_enum` per (index, field, awalan).
     terms_cache: std::collections::HashMap<TermsKey, Vec<String>>,
     terms_pending: Option<Pending<(TermsKey, Vec<String>)>>,
@@ -283,9 +283,9 @@ impl Console {
                     self.pending = None;
                     self.started = None;
                     self.notice = Some("Dibatalkan. Membatalkan task di server…".into());
-                    if let Some((conn, opaque)) = self.running.take() {
+                    if let Some((source, opaque)) = self.running.take() {
                         self.cancel_pending = Some(Pending::spawn(ui.ctx(), move || {
-                            crate::es::client::cancel_opaque(&conn, &opaque)
+                            crate::es::client::cancel_opaque(&*source.open()?, &opaque)
                         }));
                     }
                 }
@@ -303,9 +303,17 @@ impl Console {
                 .button("Salin cURL")
                 .on_hover_text("Kredensial disamarkan")
                 .clicked()
-                && let Ok((conn, _)) = self.target(cx)
+                && let Ok((source, _)) = self.target(cx)
             {
-                self.copy_curl(ui.ctx(), &conn);
+                // cURL hanya butuh URL dan jenis auth (secret disamarkan): keychain tidak dibaca.
+                let conn = match source {
+                    Source::Ready(conn) => Ok(conn),
+                    Source::Profile(profile) => Conn::new(&profile, None).map(Arc::new),
+                };
+                match conn {
+                    Ok(conn) => self.copy_curl(ui.ctx(), &conn),
+                    Err(err) => self.notice = Some(err),
+                }
             }
             ui.menu_button("Snippet", |ui| {
                 for (name, text) in parse::SNIPPETS {
@@ -990,7 +998,7 @@ impl Console {
                 }
             }
         }
-        let (conn, profile) = match self.target(cx) {
+        let (source, profile) = match self.target(cx) {
             Ok(t) => t,
             Err(err) => {
                 self.notice = Some(err);
@@ -998,22 +1006,23 @@ impl Console {
             }
         };
         let dangerous = prepared.iter().any(|p| is_dangerous(&p.method, &p.path));
-        if profile.is_prod() && dangerous && !conn.read_only {
+        if profile.is_prod() && dangerous && !profile.read_only {
             self.confirm = Some(prepared);
             self.confirm_typed.clear();
             return;
         }
-        self.execute(ctx, &conn, prepared);
+        self.execute(ctx, source, prepared);
     }
 
     /// Koneksi + profile untuk tab aktif (CON-64).
-    fn target(&self, cx: &Ctx) -> Result<(Arc<Conn>, crate::profile::Profile), String> {
+    /// `Conn` profile lain dibangun di thread eksekusi, bukan di sini (membaca keychain OS).
+    fn target(&self, cx: &Ctx) -> Result<(Source, crate::profile::Profile), String> {
         let Some(id) = self.tabs[self.active]
             .target
             .clone()
             .filter(|id| *id != cx.profile.id)
         else {
-            return Ok((cx.conn.clone(), cx.profile.clone()));
+            return Ok((Source::Ready(cx.conn.clone()), cx.profile.clone()));
         };
         let profile = cx
             .profiles
@@ -1022,23 +1031,27 @@ impl Console {
             .cloned()
             .ok_or("Profile target tab ini sudah dihapus.")?;
         // Dibuat per eksekusi supaya perubahan profile target langsung berlaku.
-        let conn = Arc::new(Conn::new(
-            &profile,
-            crate::profile::secret::get(&id).as_deref(),
-        )?);
-        Ok((conn, profile))
+        Ok((Source::Profile(Box::new(profile.clone())), profile))
     }
 
-    fn execute(&mut self, ctx: &egui::Context, conn: &Arc<Conn>, prepared: Vec<Prepared>) {
+    fn execute(&mut self, ctx: &egui::Context, source: Source, prepared: Vec<Prepared>) {
         let opaque = format!(
             "elastic-gui-{:x}",
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
         );
-        self.running = Some((conn.clone(), opaque.clone()));
-        let conn = conn.clone();
+        self.running = Some((source.clone(), opaque.clone()));
         self.notice = None;
         self.started = Some(Instant::now());
         self.pending = Some(Pending::spawn(ctx, move || {
+            let conn = match source.open() {
+                Ok(conn) => conn,
+                Err(err) => {
+                    return prepared
+                        .into_iter()
+                        .map(|p| (p, Err(err.clone())))
+                        .collect();
+                }
+            };
             prepared
                 .into_iter()
                 .map(|p| {
@@ -1324,7 +1337,7 @@ impl Console {
             Confirm::Yes => {
                 if let Some(prepared) = self.confirm.take() {
                     match self.target(cx) {
-                        Ok((conn, _)) => self.execute(ctx, &conn, prepared),
+                        Ok((source, _)) => self.execute(ctx, source, prepared),
                         Err(err) => self.notice = Some(err),
                     }
                 }

@@ -1,5 +1,6 @@
 //! Satu-satunya jalur HTTP ke Elasticsearch: auth, TLS, timeout, failover, guard read-only.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -358,6 +359,31 @@ fn describe_reqwest(err: &reqwest::Error) -> String {
     text
 }
 
+impl Conn {
+    /// `Conn` untuk profile dengan secret dari keychain. Membaca keychain bisa memblokir,
+    /// jadi hanya dipanggil di thread latar (lihat `Source`).
+    pub fn connect(profile: &Profile) -> Result<Self, String> {
+        Self::new(profile, crate::profile::secret::get(&profile.id).as_deref())
+    }
+}
+
+/// Koneksi yang siap dipakai, atau profile yang `Conn`-nya baru dibangun di thread latar
+/// supaya thread UI tidak menunggu keychain OS.
+#[derive(Clone)]
+pub enum Source {
+    Ready(Arc<Conn>),
+    Profile(Box<Profile>),
+}
+
+impl Source {
+    pub fn open(&self) -> Result<Arc<Conn>, String> {
+        match self {
+            Source::Ready(conn) => Ok(conn.clone()),
+            Source::Profile(profile) => Conn::connect(profile).map(Arc::new),
+        }
+    }
+}
+
 /// Koneksi uji ke cluster nyata dari `ELASTIC_URL` dkk. Selalu read-only.
 #[cfg(test)]
 pub fn live_conn() -> Option<Conn> {
@@ -369,6 +395,13 @@ pub fn live_conn() -> Option<Conn> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_ready_memakai_conn_yang_sama() {
+        let conn = Arc::new(Conn::new(&Profile::default(), None).unwrap());
+        let opened = Source::Ready(conn.clone()).open().unwrap();
+        assert!(Arc::ptr_eq(&conn, &opened));
+    }
 
     #[test]
     fn node_order_melingkar() {

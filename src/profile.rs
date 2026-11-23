@@ -204,32 +204,54 @@ pub mod secret {
 
     const SERVICE: &str = "id.menglabs.elastic-gui";
 
-    fn session() -> &'static Mutex<HashMap<String, String>> {
-        static SESSION: std::sync::OnceLock<Mutex<HashMap<String, String>>> =
-            std::sync::OnceLock::new();
+    /// `None` = sudah dicek dan tidak ada di keychain (cache negatif).
+    type Cache = HashMap<String, Option<String>>;
+
+    fn session() -> &'static Mutex<Cache> {
+        static SESSION: std::sync::OnceLock<Mutex<Cache>> = std::sync::OnceLock::new();
         SESSION.get_or_init(Default::default)
     }
 
-    pub fn get(profile_id: &str) -> Option<String> {
-        if let Some(value) = session().lock().ok()?.get(profile_id) {
-            return Some(value.clone());
+    /// Ambil dari cache; bila belum pernah dicek, tanya `backend` lalu simpan hasilnya,
+    /// termasuk "tidak ada", supaya keychain tidak disentuh berulang kali.
+    fn lookup(
+        cache: &Mutex<Cache>,
+        profile_id: &str,
+        backend: impl FnOnce() -> Option<String>,
+    ) -> Option<String> {
+        if let Some(hit) = cache.lock().ok().and_then(|m| m.get(profile_id).cloned()) {
+            return hit;
         }
-        let value = keyring::Entry::new(SERVICE, profile_id)
-            .ok()?
-            .get_password()
-            .ok()?;
-        session()
-            .lock()
-            .ok()?
-            .insert(profile_id.to_owned(), value.clone());
-        Some(value)
+        let value = backend();
+        remember(cache, profile_id, value.clone());
+        value
+    }
+
+    fn remember(cache: &Mutex<Cache>, profile_id: &str, value: Option<String>) {
+        if let Ok(mut map) = cache.lock() {
+            map.insert(profile_id.to_owned(), value);
+        }
+    }
+
+    /// Membaca keychain OS bila belum ada di cache sesi. Bisa memblokir (dialog izin
+    /// macOS), jadi hanya dipanggil dari thread latar.
+    pub fn get(profile_id: &str) -> Option<String> {
+        lookup(session(), profile_id, || {
+            keyring::Entry::new(SERVICE, profile_id)
+                .ok()?
+                .get_password()
+                .ok()
+        })
+    }
+
+    /// Isi cache sesi tanpa menyentuh keychain; `None` bila belum pernah dicek.
+    pub fn cached(profile_id: &str) -> Option<Option<String>> {
+        session().lock().ok()?.get(profile_id).cloned()
     }
 
     /// Simpan secret. `Err` berisi peringatan jika hanya tersimpan di memori.
     pub fn set(profile_id: &str, value: &str, persist: bool) -> Result<(), String> {
-        if let Ok(mut map) = session().lock() {
-            map.insert(profile_id.to_owned(), value.to_owned());
-        }
+        remember(session(), profile_id, Some(value.to_owned()));
         if !persist {
             return Ok(());
         }
@@ -241,11 +263,73 @@ pub mod secret {
     }
 
     pub fn delete(profile_id: &str) {
-        if let Ok(mut map) = session().lock() {
-            map.remove(profile_id);
-        }
+        remember(session(), profile_id, None);
         if let Ok(entry) = keyring::Entry::new(SERVICE, profile_id) {
             let _ = entry.delete_credential();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::cell::Cell;
+
+        fn counting<'a>(
+            calls: &'a Cell<u32>,
+            value: Option<&'a str>,
+        ) -> impl FnOnce() -> Option<String> + 'a {
+            move || {
+                calls.set(calls.get() + 1);
+                value.map(str::to_owned)
+            }
+        }
+
+        #[test]
+        fn hasil_positif_dicache() {
+            let cache = Mutex::default();
+            let calls = Cell::new(0);
+            assert_eq!(
+                lookup(&cache, "a", counting(&calls, Some("pw"))).as_deref(),
+                Some("pw")
+            );
+            assert_eq!(
+                lookup(&cache, "a", counting(&calls, None)).as_deref(),
+                Some("pw")
+            );
+            assert_eq!(calls.get(), 1);
+        }
+
+        #[test]
+        fn hasil_negatif_dicache() {
+            let cache = Mutex::default();
+            let calls = Cell::new(0);
+            assert_eq!(lookup(&cache, "a", counting(&calls, None)), None);
+            assert_eq!(lookup(&cache, "a", counting(&calls, Some("pw"))), None);
+            assert_eq!(calls.get(), 1);
+        }
+
+        #[test]
+        fn set_dan_delete_memperbarui_cache() {
+            let cache = Mutex::default();
+            let calls = Cell::new(0);
+            assert_eq!(lookup(&cache, "a", counting(&calls, None)), None);
+            remember(&cache, "a", Some("baru".into()));
+            assert_eq!(
+                lookup(&cache, "a", counting(&calls, None)).as_deref(),
+                Some("baru")
+            );
+            remember(&cache, "a", None);
+            assert_eq!(lookup(&cache, "a", counting(&calls, Some("lama"))), None);
+            assert_eq!(calls.get(), 1);
+        }
+
+        #[test]
+        fn profile_lain_tidak_tercampur() {
+            let cache = Mutex::default();
+            let calls = Cell::new(0);
+            remember(&cache, "a", Some("pw".into()));
+            assert_eq!(lookup(&cache, "b", counting(&calls, None)), None);
+            assert_eq!(calls.get(), 1);
         }
     }
 }
