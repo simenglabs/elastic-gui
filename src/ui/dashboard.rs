@@ -13,6 +13,7 @@ use crate::es::Conn;
 use crate::es::catalog::Field;
 use crate::es::client::Source;
 use crate::es::query::{self, Filter, QueryMode, TimeBounds};
+use crate::i18n::{t, tf};
 use crate::task::{Pending, poll};
 use crate::ui::discover::{SAVED_FILE, SavedSearch};
 use crate::widgets::{self, Confirm, filters, time::TimeRange};
@@ -62,13 +63,13 @@ impl Kind {
         match self {
             Kind::Metric => "Metric",
             Kind::TimeSeries => "Time series",
-            Kind::Bar => "Bar kategori",
+            Kind::Bar => t("Bar kategori"),
             Kind::Pie => "Pie / donut",
-            Kind::Table => "Tabel",
+            Kind::Table => t("Tabel"),
             Kind::Markdown => "Markdown",
-            Kind::SavedSearch => "Pencarian tersimpan",
+            Kind::SavedSearch => t("Pencarian tersimpan"),
             Kind::Raw => "Raw DSL / ES|QL",
-            Kind::Control => "Kontrol filter",
+            Kind::Control => t("Kontrol filter"),
         }
     }
 
@@ -113,7 +114,7 @@ impl Agg {
             Agg::Max => "Max",
             Agg::Cardinality => "Unique count",
             Agg::P50 => "Median (p50)",
-            Agg::P95 => "Persentil 95",
+            Agg::P95 => t("Persentil 95"),
         }
     }
 
@@ -332,7 +333,7 @@ impl Dashboard {
             .show(ui, |ui| self.list_ui(ui));
         let Some(index) = self.active.filter(|i| *i < self.dashes.len()) else {
             egui::CentralPanel::default().show(ui, |ui| {
-                ui.weak("Pilih atau buat dashboard di panel kiri.");
+                ui.weak(t("Pilih atau buat dashboard di panel kiri."));
             });
             return;
         };
@@ -392,15 +393,15 @@ impl Dashboard {
     fn list_ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("Dashboard");
         ui.horizontal(|ui| {
-            if ui.button("+ Baru").clicked() {
+            if ui.button(t("+ Baru")).clicked() {
                 self.dashes.push(Dash::default());
                 self.open(self.dashes.len() - 1);
                 self.edit = true;
                 self.dirty = true;
             }
             if ui
-                .button("Impor…")
-                .on_hover_text("Impor file JSON dashboard")
+                .button(t("Impor…"))
+                .on_hover_text(t("Impor file JSON dashboard"))
                 .clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter("JSON", &["json"])
@@ -416,11 +417,11 @@ impl Dashboard {
                         self.open(self.dashes.len() - 1);
                         self.dirty = true;
                     }
-                    Err(err) => self.error = Some(format!("Gagal impor: {err}")),
+                    Err(err) => self.error = Some(tf("Gagal impor: {0}", &[&err])),
                 }
             }
         });
-        ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Cari…"));
+        ui.add(egui::TextEdit::singleline(&mut self.search).hint_text(t("Cari…")));
         ui.separator();
         let needle = self.search.to_lowercase();
         let mut pick = None;
@@ -462,7 +463,7 @@ impl Dashboard {
                 }
             } else if ui
                 .heading(&dash.name)
-                .on_hover_text("Klik dua kali untuk ganti nama")
+                .on_hover_text(t("Klik dua kali untuk ganti nama"))
                 .double_clicked()
             {
                 self.renaming = true;
@@ -482,7 +483,7 @@ impl Dashboard {
             let dates: Vec<&Field> = fields.iter().filter(|f| f.is_date()).collect();
             egui::ComboBox::from_id_salt("dash_time_field")
                 .selected_text(if dash.time_field.is_empty() {
-                    "tanpa waktu"
+                    t("tanpa waktu")
                 } else {
                     dash.time_field.as_str()
                 })
@@ -502,30 +503,30 @@ impl Dashboard {
             ui.toggle_value(&mut self.edit, "✎ Edit");
             if self.pending.is_some() {
                 ui.spinner();
-            } else if ui.button("⟳").on_hover_text("Muat ulang").clicked() {
+            } else if ui.button("⟳").on_hover_text(t("Muat ulang")).clicked() {
                 changed = true;
             }
             ui.menu_button("⋯", |ui| {
-                if ui.button("Duplikat").clicked() {
+                if ui.button(t("Duplikat")).clicked() {
                     let mut copy = dash.clone();
                     copy.id = Dash::default().id;
-                    copy.name = format!("{} (salinan)", copy.name);
+                    copy.name = tf("{0} (salinan)", &[&copy.name]);
                     duplicate = Some(copy);
                     ui.close();
                 }
-                if ui.button("Ekspor…").clicked() {
+                if ui.button(t("Ekspor…")).clicked() {
                     if let Some(path) = rfd::FileDialog::new()
                         .set_file_name(format!("{}.json", dash.name))
                         .save_file()
                     {
                         let text = serde_json::to_string_pretty(&*dash).unwrap_or_default();
                         if let Err(err) = std::fs::write(path, text) {
-                            self.error = Some(format!("Gagal ekspor: {err}"));
+                            self.error = Some(tf("Gagal ekspor: {0}", &[&err]));
                         }
                     }
                     ui.close();
                 }
-                if ui.button("Hapus dashboard").clicked() {
+                if ui.button(t("Hapus dashboard")).clicked() {
                     self.confirm_delete = true;
                     self.confirm_typed.clear();
                     ui.close();
@@ -542,10 +543,10 @@ impl Dashboard {
                 egui::TextEdit::singleline(&mut dash.query)
                     .desired_width((ui.available_width() - 80.0).max(200.0))
                     .font(egui::TextStyle::Monospace)
-                    .hint_text("Query KQL global, mis. status:500 and not level:debug"),
+                    .hint_text(t("Query KQL global, mis. status:500 and not level:debug")),
             );
             if (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                || ui.button("Terapkan").clicked()
+                || ui.button(t("Terapkan")).clicked()
             {
                 changed = true;
             }
@@ -553,7 +554,7 @@ impl Dashboard {
         if filters::filter_bar(ui, &mut dash.filters, fields, &mut self.filter_draft) {
             changed = true;
         }
-        if self.edit && ui.button("+ Tambah panel").clicked() {
+        if self.edit && ui.button(t("+ Tambah panel")).clicked() {
             dash.panels.push(Panel::default());
             self.editing = Some(dash.panels.len() - 1);
             changed = true;
@@ -569,11 +570,13 @@ impl Dashboard {
     fn grid(&mut self, ui: &mut egui::Ui, cx: &mut Ctx, index: usize) {
         let dash = &self.dashes[index];
         if dash.pattern.is_empty() {
-            ui.weak("Isi pola index di atas untuk mulai.");
+            ui.weak(t("Isi pola index di atas untuk mulai."));
             return;
         }
         if dash.panels.is_empty() {
-            ui.weak("Belum ada panel. Aktifkan ✎ Edit lalu klik + Tambah panel.");
+            ui.weak(t(
+                "Belum ada panel. Aktifkan ✎ Edit lalu klik + Tambah panel.",
+            ));
             return;
         }
         let total = ui.available_width();
@@ -618,7 +621,7 @@ impl Dashboard {
                                         },
                                     )
                                     .response
-                                    .on_hover_text("Drag ke panel lain untuk memindahkan");
+                                    .on_hover_text(t("Drag ke panel lain untuk memindahkan"));
                                 } else {
                                     ui.strong(&panel.title);
                                 }
@@ -632,8 +635,8 @@ impl Dashboard {
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             for (icon, name, tip) in [
-                                                ("🗑", "delete", "Hapus"),
-                                                ("✎", "edit", "Edit panel"),
+                                                ("🗑", "delete", t("Hapus")),
+                                                ("✎", "edit", t("Edit panel")),
                                             ] {
                                                 if ui
                                                     .small_button(icon)
@@ -651,7 +654,9 @@ impl Dashboard {
                                         |ui| {
                                             if ui
                                                 .small_button("⌕")
-                                                .on_hover_text("Inspect: buka request di Dev Tools")
+                                                .on_hover_text(t(
+                                                    "Inspect: buka request di Dev Tools",
+                                                ))
                                                 .clicked()
                                             {
                                                 action = Some((i, "inspect"));
@@ -690,11 +695,11 @@ impl Dashboard {
                                         .width((width - 40.0).max(120.0))
                                         .selected_text(
                                             chosen.clone().unwrap_or_else(|| {
-                                                format!("Semua {}", panel.split)
+                                                tf("Semua {0}", &[&panel.split])
                                             }),
                                         )
                                         .show_ui(ui, |ui| {
-                                            ui.selectable_value(&mut chosen, None, "Semua");
+                                            ui.selectable_value(&mut chosen, None, t("Semua"));
                                             for (k, v) in list {
                                                 ui.selectable_value(
                                                     &mut chosen,
@@ -727,7 +732,7 @@ impl Dashboard {
                                     egui::Sense::drag(),
                                 )
                                 .on_hover_cursor(egui::CursorIcon::ResizeNwSe)
-                                .on_hover_text("Drag untuk ubah ukuran");
+                                .on_hover_text(t("Drag untuk ubah ukuran"));
                             ui.painter().text(
                                 handle.center(),
                                 egui::Align2::CENTER_CENTER,
@@ -849,7 +854,7 @@ impl Dashboard {
         let before = serde_json::to_string(&self.dashes[index].panels[p]).unwrap_or_default();
         let panel = &mut self.dashes[index].panels[p];
         ui.horizontal(|ui| {
-            ui.heading("Edit panel");
+            ui.heading(t("Edit panel"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("✕").clicked() {
                     self.editing = None;
@@ -861,10 +866,10 @@ impl Dashboard {
                 .num_columns(2)
                 .spacing([8.0, 6.0])
                 .show(ui, |ui| {
-                    ui.label("Judul");
+                    ui.label(t("Judul"));
                     ui.text_edit_singleline(&mut panel.title);
                     ui.end_row();
-                    ui.label("Tipe");
+                    ui.label(t("Tipe"));
                     egui::ComboBox::from_id_salt("panel_kind")
                         .selected_text(panel.kind.label())
                         .show_ui(ui, |ui| {
@@ -874,7 +879,7 @@ impl Dashboard {
                         });
                     ui.end_row();
                     if panel.kind == Kind::Markdown {
-                        ui.label("Teks");
+                        ui.label(t("Teks"));
                         ui.add(egui::TextEdit::multiline(&mut panel.markdown).desired_rows(8));
                         ui.end_row();
                     } else if panel.kind == Kind::Raw {
@@ -884,28 +889,28 @@ impl Dashboard {
                                 .code_editor()
                                 .desired_rows(10)
                                 .desired_width(260.0)
-                                .hint_text("{\"size\": 0, \"aggs\": {...}}  atau  FROM logs-* | STATS ..."),
+                                .hint_text(t("{\"size\": 0, \"aggs\": {...}}  atau  FROM logs-* | STATS ...")),
                         );
                         ui.end_row();
-                        ui.label("Path bucket");
+                        ui.label(t("Path bucket"));
                         ui.add(
                             egui::TextEdit::singleline(&mut panel.raw_path)
-                                .hint_text("/aggregations/NAMA/buckets (opsional)"),
+                                .hint_text(t("/aggregations/NAMA/buckets (opsional)")),
                         )
-                        .on_hover_text("JSON pointer ke array bucket; jika diisi, hasil tampil sebagai bar. Kosong = tree response.");
+                        .on_hover_text(t("JSON pointer ke array bucket; jika diisi, hasil tampil sebagai bar. Kosong = tree response."));
                         ui.end_row();
                         ui.label("");
-                        ui.weak("Waktu, query, dan filter dashboard ditambahkan sebagai filter.");
+                        ui.weak(t("Waktu, query, dan filter dashboard ditambahkan sebagai filter."));
                         ui.end_row();
                     } else if panel.kind == Kind::Control {
                         ui.label("Field");
                         field_combo(ui, "panel_control", &mut panel.split, fields, |f| f.aggregatable && !f.is_date());
                         ui.end_row();
-                        ui.label("Jumlah opsi");
+                        ui.label(t("Jumlah opsi"));
                         ui.add(egui::DragValue::new(&mut panel.size).range(5..=200));
                         ui.end_row();
                     } else if panel.kind == Kind::SavedSearch {
-                        ui.label("Pencarian");
+                        ui.label(t("Pencarian"));
                         egui::ComboBox::from_id_salt("panel_saved")
                             .selected_text(if panel.saved.is_empty() {
                                 "-"
@@ -920,7 +925,7 @@ impl Dashboard {
                         ui.end_row();
                         if self.saved_names.is_empty() {
                             ui.label("");
-                            ui.weak("Belum ada. Simpan pencarian dari Discover (⭐).");
+                            ui.weak(t("Belum ada. Simpan pencarian dari Discover (⭐)."));
                             ui.end_row();
                         }
                     } else {
@@ -943,9 +948,9 @@ impl Dashboard {
                         }
                         if panel.kind.uses_split() {
                             ui.label(if panel.kind == Kind::TimeSeries {
-                                "Pisah per (opsional)"
+                                t("Pisah per (opsional)")
                             } else {
-                                "Kelompok per"
+                                t("Kelompok per")
                             });
                             field_combo(ui, "panel_split", &mut panel.split, fields, |f| {
                                 f.aggregatable && !f.is_date()
@@ -956,7 +961,7 @@ impl Dashboard {
                             ui.end_row();
                         }
                         if panel.kind == Kind::TimeSeries {
-                            ui.label("Gaya");
+                            ui.label(t("Gaya"));
                             ui.horizontal(|ui| {
                                 ui.selectable_value(&mut panel.style, Style::Line, "Line");
                                 ui.selectable_value(&mut panel.style, Style::Area, "Area");
@@ -966,14 +971,14 @@ impl Dashboard {
                         }
                         ui.label("Format");
                         ui.horizontal(|ui| {
-                            ui.selectable_value(&mut panel.format, Format::Number, "Angka");
+                            ui.selectable_value(&mut panel.format, Format::Number, t("Angka"));
                             ui.selectable_value(&mut panel.format, Format::Bytes, "Bytes");
-                            ui.selectable_value(&mut panel.format, Format::Millis, "Durasi (ms)");
+                            ui.selectable_value(&mut panel.format, Format::Millis, t("Durasi (ms)"));
                         });
                         ui.end_row();
-                        ui.label("Query panel");
+                        ui.label(t("Query panel"));
                         ui.add(
-                            egui::TextEdit::singleline(&mut panel.query).hint_text("KQL, opsional"),
+                            egui::TextEdit::singleline(&mut panel.query).hint_text(t("KQL, opsional")),
                         );
                         ui.end_row();
                     }
@@ -984,30 +989,30 @@ impl Dashboard {
                             .profile
                             .as_ref()
                             .and_then(|id| cx.profiles.iter().find(|p| &p.id == id))
-                            .map_or_else(|| format!("{} (aktif)", cx.profile.name), |p| p.name.clone());
+                            .map_or_else(|| tf("{0} (aktif)", &[&cx.profile.name]), |p| p.name.clone());
                         egui::ComboBox::from_id_salt("panel_profile")
                             .selected_text(label)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut panel.profile, None, format!("{} (aktif)", cx.profile.name));
+                                ui.selectable_value(&mut panel.profile, None, tf("{0} (aktif)", &[&cx.profile.name]));
                                 for pr in cx.profiles.iter().filter(|pr| pr.id != cx.profile.id) {
                                     ui.selectable_value(&mut panel.profile, Some(pr.id.clone()), format!("{} · {}", pr.name, pr.env.label()));
                                 }
                             });
                         ui.end_row();
                     }
-                    ui.label("Lebar");
+                    ui.label(t("Lebar"));
                     ui.horizontal(|ui| {
                         for w in 1..=3u8 {
                             ui.selectable_value(&mut panel.width, w, format!("{w}/3"));
                         }
                     });
                     ui.end_row();
-                    ui.label("Tinggi");
+                    ui.label(t("Tinggi"));
                     ui.add(egui::Slider::new(&mut panel.height, 120.0..=600.0));
                     ui.end_row();
                 });
             if panel.kind.uses_split() && panel.kind != Kind::TimeSeries && panel.split.is_empty() {
-                widgets::warn_box(ui, "Pilih field \"Kelompok per\".");
+                widgets::warn_box(ui, t("Pilih field \"Kelompok per\"."));
             }
         });
         let after = serde_json::to_string(&self.dashes[index].panels[p]).unwrap_or_default();
@@ -1064,7 +1069,7 @@ impl Dashboard {
                         .profiles
                         .iter()
                         .find(|p| &p.id == id)
-                        .ok_or_else(|| "Profile sumber panel sudah dihapus.".to_string())
+                        .ok_or_else(|| t("Profile sumber panel sudah dihapus.").to_string())
                         .map(|p| {
                             conns.push((Some(id.clone()), Source::Profile(Box::new(p.clone()))));
                             conns.len() - 1
@@ -1147,7 +1152,7 @@ impl Dashboard {
                                 saved_time_field(&saved_names, &panel.saved),
                             ),
                             Some(r) => parse_panel(panel, r),
-                            None => Data::Error("Response kosong".into()),
+                            None => Data::Error(t("Response kosong").into()),
                         },
                     });
                 }
@@ -1157,7 +1162,7 @@ impl Dashboard {
                 .zip(out)
                 .map(|(req, data)| match req {
                     Req::Static(d) => d,
-                    Req::Search { .. } => data.unwrap_or(Data::Error("Response kosong".into())),
+                    Req::Search { .. } => data.unwrap_or(Data::Error(t("Response kosong").into())),
                     Req::Esql { conn, body } => {
                         let conn = conns[conn].clone();
                         match conn.and_then(|c| c.json("POST", "/_query?format=json", Some(&body)))
@@ -1192,10 +1197,13 @@ impl Dashboard {
             self.confirm_delete = false;
             return;
         };
-        let message = format!("Dashboard \"{}\" akan dihapus.", self.dashes[index].name);
+        let message = tf(
+            "Dashboard \"{0}\" akan dihapus.",
+            &[&self.dashes[index].name],
+        );
         match widgets::confirm_dialog(
             ctx,
-            "Hapus dashboard?",
+            t("Hapus dashboard?"),
             &message,
             None,
             &mut self.confirm_typed,
@@ -1255,9 +1263,9 @@ fn saved_body(
     let s = saved
         .iter()
         .find(|s| s.name == panel.saved)
-        .ok_or("Pilih pencarian tersimpan (dibuat dari Discover).")?;
+        .ok_or(t("Pilih pencarian tersimpan (dibuat dari Discover)."))?;
     if s.esql {
-        return Err("Pencarian ES|QL belum didukung sebagai panel.".into());
+        return Err(t("Pencarian ES|QL belum didukung sebagai panel.").into());
     }
     let time = s.time_field.as_deref().zip(bounds);
     let query = query::build(s.mode, &s.query, &s.filters, time)?;
@@ -1285,15 +1293,15 @@ fn raw_request(
         .zip(bounds);
     let global = query::build(QueryMode::Kql, &dash.query, &dash.filters, time)?;
     if panel.raw.trim().is_empty() {
-        return Err("Isi body DSL atau query ES|QL di editor panel.".into());
+        return Err(t("Isi body DSL atau query ES|QL di editor panel.").into());
     }
     if is_esql(&panel.raw) {
         return Ok(Err(json!({"query": panel.raw.trim(), "filter": global})));
     }
     let mut body: Value =
-        serde_json::from_str(&panel.raw).map_err(|e| format!("Body DSL tidak valid: {e}"))?;
+        serde_json::from_str(&panel.raw).map_err(|e| tf("Body DSL tidak valid: {0}", &[&e]))?;
     if !body.is_object() {
-        return Err("Body DSL harus objek JSON.".into());
+        return Err(t("Body DSL harus objek JSON.").into());
     }
     let user = body
         .get("query")
@@ -1320,9 +1328,9 @@ fn raw_data(panel: &Panel, r: &Value) -> Data {
                     .collect(),
                 0.0,
             ),
-            None => Data::Error(format!(
-                "Pointer {} bukan array bucket di response.",
-                panel.raw_path
+            None => Data::Error(tf(
+                "Pointer {0} bukan array bucket di response.",
+                &[&panel.raw_path],
             )),
         };
     }
@@ -1353,7 +1361,7 @@ fn panel_body(
     }
     let query = query::build(QueryMode::Kql, &text, &dash.filters, time)?;
     if panel.agg != Agg::Count && panel.field.is_empty() {
-        return Err("Pilih field untuk metric.".into());
+        return Err(t("Pilih field untuk metric.").into());
     }
     let metric = panel.agg.dsl(&panel.field).map(|m| json!({"m": m}));
     let terms = |inner: Option<Value>| {
@@ -1366,7 +1374,7 @@ fn panel_body(
     let aggs = match panel.kind {
         Kind::Metric | Kind::Markdown | Kind::SavedSearch | Kind::Raw => metric.clone(),
         Kind::TimeSeries => {
-            let (tf, b) = time.ok_or("Time series butuh field waktu.")?;
+            let (tf, b) = time.ok_or(t("Time series butuh field waktu."))?;
             let inner = if panel.split.is_empty() {
                 metric.clone()
             } else {
@@ -1382,7 +1390,7 @@ fn panel_body(
         }
         Kind::Bar | Kind::Pie | Kind::Table | Kind::Control => {
             if panel.split.is_empty() {
-                return Err("Pilih field pengelompokan.".into());
+                return Err(t("Pilih field pengelompokan.").into());
             }
             Some(json!({"s": terms(metric.clone())}))
         }
@@ -1585,7 +1593,7 @@ fn render(ui: &mut egui::Ui, i: usize, panel: &Panel, data: &Data) -> Option<Eve
                 .id_salt(("docs", i))
                 .show(ui, |ui| {
                     if hits.is_empty() {
-                        ui.weak("Tidak ada dokumen pada rentang ini.");
+                        ui.weak(t("Tidak ada dokumen pada rentang ini."));
                     }
                     for hit in hits {
                         ui.horizontal(|ui| {
@@ -1641,8 +1649,9 @@ fn brush(ui: &mut egui::Ui, i: usize, response: &egui_plot::PlotResponse<()>) ->
             return Some(Event::Zoom(a.min(b) as i64, a.max(b) as i64));
         }
     }
-    r.clone()
-        .on_hover_text("Drag untuk memilih rentang waktu · klik seri untuk memfilter");
+    r.clone().on_hover_text(t(
+        "Drag untuk memilih rentang waktu · klik seri untuk memfilter",
+    ));
     None
 }
 
@@ -1724,7 +1733,7 @@ fn terms_bars(
         }
     }
     r.clone()
-        .on_hover_text("Klik batang untuk memfilter dashboard");
+        .on_hover_text(t("Klik batang untuk memfilter dashboard"));
     None
 }
 
@@ -1749,7 +1758,7 @@ fn terms_table(
         if sort.1 { ord } else { ord.reverse() }
     });
     ui.horizontal(|ui| {
-        if ui.small_button("Ekspor CSV").clicked()
+        if ui.small_button(t("Ekspor CSV")).clicked()
             && let Some(path) = rfd::FileDialog::new()
                 .set_file_name(format!("{}.csv", panel.title))
                 .save_file()
@@ -1793,14 +1802,18 @@ fn terms_table(
                     }
                     ui.end_row();
                     for (k, v) in &rows {
-                        if ui.link(k).on_hover_text("Klik untuk memfilter").clicked() {
+                        if ui
+                            .link(k)
+                            .on_hover_text(t("Klik untuk memfilter"))
+                            .clicked()
+                        {
                             picked = Some(Filter::is(&panel.split, k, false));
                         }
                         ui.label(fmt(panel.format, *v));
                         ui.end_row();
                     }
                     if other > 0.0 {
-                        ui.weak("Lainnya (dokumen)");
+                        ui.weak(t("Lainnya (dokumen)"));
                         ui.weak(widgets::format_count(other as u64));
                         ui.end_row();
                     }
@@ -1824,7 +1837,7 @@ fn pie(
         .map(|(i, (k, v))| (k.clone(), v.max(0.0), PALETTE[i % PALETTE.len()]))
         .collect();
     if other > 0.0 && panel.agg == Agg::Count {
-        slices.push(("Lainnya".into(), other, Color32::GRAY));
+        slices.push((t("Lainnya").into(), other, Color32::GRAY));
     }
     let total: f64 = slices.iter().map(|s| s.1).sum();
     let mut picked = None;
@@ -1874,7 +1887,7 @@ fn pie(
             response
                 .clone()
                 .on_hover_text(format!("{k}: {} ({pct:.1}%)", fmt(panel.format, *v)));
-            if response.clicked() && k != "Lainnya" {
+            if response.clicked() && k != t("Lainnya") {
                 picked = Some(Filter::is(&panel.split, k, false));
             }
         }
@@ -1883,7 +1896,7 @@ fn pie(
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("■").color(*color));
                     let pct = if total > 0.0 { v / total * 100.0 } else { 0.0 };
-                    if ui.link(format!("{k} · {pct:.1}%")).clicked() && k != "Lainnya" {
+                    if ui.link(format!("{k} · {pct:.1}%")).clicked() && k != t("Lainnya") {
                         picked = Some(Filter::is(&panel.split, k, false));
                     }
                 });
@@ -1893,9 +1906,150 @@ fn pie(
     picked
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("Bar kategori", "Category bar"),
+    ("Pencarian tersimpan", "Saved search"),
+    ("Kontrol filter", "Filter control"),
+    ("Persentil 95", "95th percentile"),
+    (
+        "Pilih atau buat dashboard di panel kiri.",
+        "Select or create a dashboard in the left panel.",
+    ),
+    ("+ Baru", "+ New"),
+    ("Impor file JSON dashboard", "Import a dashboard JSON file"),
+    ("Gagal impor: {0}", "Import failed: {0}"),
+    ("Muat ulang", "Reload"),
+    ("Gagal ekspor: {0}", "Export failed: {0}"),
+    ("Hapus dashboard", "Delete dashboard"),
+    (
+        "Query KQL global, mis. status:500 and not level:debug",
+        "Global KQL query, e.g. status:500 and not level:debug",
+    ),
+    ("+ Tambah panel", "+ Add panel"),
+    (
+        "Isi pola index di atas untuk mulai.",
+        "Enter an index pattern above to start.",
+    ),
+    (
+        "Belum ada panel. Aktifkan ✎ Edit lalu klik + Tambah panel.",
+        "No panels yet. Enable ✎ Edit, then click + Add panel.",
+    ),
+    (
+        "Drag ke panel lain untuk memindahkan",
+        "Drag onto another panel to move",
+    ),
+    ("Edit panel", "Edit panel"),
+    (
+        "Inspect: buka request di Dev Tools",
+        "Inspect: open the request in Dev Tools",
+    ),
+    ("Semua {0}", "All {0}"),
+    ("Semua", "All"),
+    ("Drag untuk ubah ukuran", "Drag to resize"),
+    ("Judul", "Title"),
+    ("Tipe", "Type"),
+    (
+        "{\"size\": 0, \"aggs\": {...}}  atau  FROM logs-* | STATS ...",
+        "{\"size\": 0, \"aggs\": {...}}  or  FROM logs-* | STATS ...",
+    ),
+    ("Path bucket", "Bucket path"),
+    (
+        "/aggregations/NAMA/buckets (opsional)",
+        "/aggregations/NAME/buckets (optional)",
+    ),
+    (
+        "JSON pointer ke array bucket; jika diisi, hasil tampil sebagai bar. Kosong = tree response.",
+        "JSON pointer to the bucket array; if set, the result is shown as bars. Empty = response tree.",
+    ),
+    (
+        "Waktu, query, dan filter dashboard ditambahkan sebagai filter.",
+        "The dashboard time range, query and filters are added as filters.",
+    ),
+    ("Jumlah opsi", "Number of options"),
+    ("Pencarian", "Search"),
+    (
+        "Belum ada. Simpan pencarian dari Discover (⭐).",
+        "None yet. Save a search from Discover (⭐).",
+    ),
+    ("Pisah per (opsional)", "Split by (optional)"),
+    ("Kelompok per", "Group by"),
+    ("Gaya", "Style"),
+    ("Angka", "Number"),
+    ("Durasi (ms)", "Duration (ms)"),
+    ("Query panel", "Panel query"),
+    ("KQL, opsional", "KQL, optional"),
+    ("Lebar", "Width"),
+    ("Tinggi", "Height"),
+    (
+        "Pilih field \"Kelompok per\".",
+        "Choose the \"Group by\" field.",
+    ),
+    (
+        "Profile sumber panel sudah dihapus.",
+        "The panel's source profile has been deleted.",
+    ),
+    ("Response kosong", "Empty response"),
+    (
+        "Dashboard \"{0}\" akan dihapus.",
+        "Dashboard \"{0}\" will be deleted.",
+    ),
+    ("Hapus dashboard?", "Delete dashboard?"),
+    (
+        "Pilih pencarian tersimpan (dibuat dari Discover).",
+        "Choose a saved search (created from Discover).",
+    ),
+    (
+        "Pencarian ES|QL belum didukung sebagai panel.",
+        "ES|QL searches are not yet supported as panels.",
+    ),
+    (
+        "Isi body DSL atau query ES|QL di editor panel.",
+        "Enter a DSL body or ES|QL query in the panel editor.",
+    ),
+    ("Body DSL tidak valid: {0}", "Invalid DSL body: {0}"),
+    (
+        "Body DSL harus objek JSON.",
+        "The DSL body must be a JSON object.",
+    ),
+    (
+        "Pointer {0} bukan array bucket di response.",
+        "Pointer {0} is not a bucket array in the response.",
+    ),
+    (
+        "Pilih field untuk metric.",
+        "Choose a field for the metric.",
+    ),
+    (
+        "Time series butuh field waktu.",
+        "Time series needs a time field.",
+    ),
+    ("Pilih field pengelompokan.", "Choose a grouping field."),
+    (
+        "Tidak ada dokumen pada rentang ini.",
+        "No documents in this range.",
+    ),
+    (
+        "Drag untuk memilih rentang waktu · klik seri untuk memfilter",
+        "Drag to select a time range · click a series to filter",
+    ),
+    (
+        "Klik batang untuk memfilter dashboard",
+        "Click a bar to filter the dashboard",
+    ),
+    ("Klik untuk memfilter", "Click to filter"),
+    ("Lainnya (dokumen)", "Other (documents)"),
+    ("Lainnya", "Other"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("dashboard.rs"), super::EN);
+    }
 
     #[test]
     fn series_ids_map_back_to_names() {
