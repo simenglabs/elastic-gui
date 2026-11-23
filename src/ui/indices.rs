@@ -61,7 +61,12 @@ enum Tab {
 struct Detail {
     name: String,
     stats: Value,
+    /// Setting eksplisit (flat); dipakai `settings_form`.
     settings: Vec<(String, String)>,
+    /// IDX-11: eksplisit + default (flag true = default); default kosong bila tidak diminta.
+    settings_all: Vec<(String, String, bool)>,
+    /// IDX-11: settings bersarang mentah (`settings`, plus `defaults` bila diminta).
+    settings_raw: Value,
     mappings: Value,
     privs: Privs,
 }
@@ -363,6 +368,12 @@ pub struct Indices {
     confirm_typed: String,
     create: Option<CreateForm>,
     settings_form: Option<SettingsForm>,
+    /// IDX-11: tampilan settings (JSON?) dan muat default.
+    settings_json: bool,
+    show_defaults: bool,
+    /// IDX-13: tampilan mappings (JSON?).
+    mappings_json: bool,
+    highlighter: widgets::Highlighter,
     new_field: (String, String),
     shards: Option<Keyed<Vec<Value>>>,
     shards_pending: Option<Pending<Keyed<Vec<Value>>>>,
@@ -712,7 +723,10 @@ impl Indices {
         self.detail = None;
         let conn = conn.clone();
         let name = name.to_owned();
-        self.detail_pending = Some(Pending::spawn(ctx, move || load_detail(&conn, &name)));
+        let defaults = self.show_defaults;
+        self.detail_pending = Some(Pending::spawn(ctx, move || {
+            load_detail(&conn, &name, defaults)
+        }));
     }
 
     fn detail_ui(&mut self, ui: &mut egui::Ui, cx: &mut Ctx, name: &str) {
@@ -875,6 +889,7 @@ impl Indices {
             Some(Ok(d)) => d,
         };
         let mut action = None;
+        let mut reload_settings = false;
         egui::ScrollArea::vertical()
             .id_salt("index_detail_scroll")
             .auto_shrink(false)
@@ -899,16 +914,43 @@ impl Indices {
                         }
                         ui.separator();
                     }
-                    egui::Grid::new("settings_grid")
-                        .striped(true)
-                        .num_columns(2)
-                        .show(ui, |ui| {
-                            for (k, v) in &detail.settings {
-                                ui.monospace(k);
-                                ui.label(v);
-                                ui.end_row();
-                            }
-                        });
+                    // IDX-11: tabel/JSON + muat default.
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.settings_json, false, "Tabel");
+                        ui.selectable_value(&mut self.settings_json, true, "JSON");
+                        ui.separator();
+                        if ui
+                            .checkbox(&mut self.show_defaults, "Tampilkan default")
+                            .changed()
+                        {
+                            reload_settings = true;
+                        }
+                        if self.settings_json && ui.button("Salin").clicked() {
+                            ui.ctx().copy_text(pretty(&detail.settings_raw));
+                        }
+                    });
+                    if self.settings_json {
+                        let text = pretty(&detail.settings_raw);
+                        widgets::code_view(ui, &text, widgets::Lang::Json, &mut self.highlighter);
+                    } else {
+                        egui::Grid::new("settings_grid")
+                            .striped(true)
+                            .num_columns(3)
+                            .show(ui, |ui| {
+                                for (k, v, is_default) in &detail.settings_all {
+                                    if *is_default {
+                                        ui.label(RichText::new(k).monospace().weak());
+                                        ui.weak(v);
+                                        ui.weak("default");
+                                    } else {
+                                        ui.monospace(k);
+                                        ui.label(v);
+                                        ui.label("");
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+                    }
                 }
                 Tab::Mappings => {
                     if !cx.conn.read_only && !closed {
@@ -916,7 +958,24 @@ impl Indices {
                         ui.weak("Mengubah tipe field yang sudah ada butuh reindex ke index baru.");
                         ui.separator();
                     }
-                    widgets::json_tree(ui, &detail.mappings, egui::Id::unique(("mapping", name)));
+                    // IDX-13: tree/JSON.
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.mappings_json, false, "Tree");
+                        ui.selectable_value(&mut self.mappings_json, true, "JSON");
+                        if self.mappings_json && ui.button("Salin").clicked() {
+                            ui.ctx().copy_text(pretty(&detail.mappings));
+                        }
+                    });
+                    if self.mappings_json {
+                        let text = pretty(&detail.mappings);
+                        widgets::code_view(ui, &text, widgets::Lang::Json, &mut self.highlighter);
+                    } else {
+                        widgets::json_tree(
+                            ui,
+                            &detail.mappings,
+                            egui::Id::unique(("mapping", name)),
+                        );
+                    }
                 }
                 Tab::Shards | Tab::Ilm => {}
                 Tab::Docs => {
@@ -969,6 +1028,10 @@ impl Indices {
                     );
                 }
             });
+        if reload_settings {
+            let ctx = ui.ctx().clone();
+            self.select(&ctx, cx.conn, name);
+        }
         if let Some(action) = action {
             self.run(ui.ctx(), cx.conn, action);
         }
@@ -2023,21 +2086,25 @@ fn load_rows(conn: &Conn) -> Result<Vec<Row>, String> {
     Ok(rows)
 }
 
-fn load_detail(conn: &Conn, name: &str) -> Result<Detail, String> {
-    let settings = conn.get(&format!("/{name}/_settings?flat_settings=true"))?;
-    let flat = settings[name]["settings"]
-        .as_object()
-        .into_iter()
-        .flatten()
-        .map(|(k, v)| {
-            (
-                k.clone(),
-                v.as_str()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| v.to_string()),
-            )
-        })
+fn load_detail(conn: &Conn, name: &str, include_defaults: bool) -> Result<Detail, String> {
+    // Tanpa flat_settings: bentuk bersarang untuk tampilan JSON; flat dihitung lokal.
+    let path = if include_defaults {
+        format!("/{name}/_settings?include_defaults=true")
+    } else {
+        format!("/{name}/_settings")
+    };
+    let resp = conn.get(&path)?;
+    let entry = &resp[name];
+    let settings_all = flatten_settings(entry, include_defaults);
+    let flat = settings_all
+        .iter()
+        .filter(|(_, _, d)| !d)
+        .map(|(k, v, _)| (k.clone(), v.clone()))
         .collect();
+    let mut settings_raw = json!({"settings": entry["settings"].clone()});
+    if include_defaults {
+        settings_raw["defaults"] = entry["defaults"].clone();
+    }
     let mappings = conn
         .get(&format!("/{name}/_mapping"))
         .map(|v| v[name]["mappings"].clone())
@@ -2050,9 +2117,49 @@ fn load_detail(conn: &Conn, name: &str) -> Result<Detail, String> {
         name: name.to_owned(),
         stats,
         settings: flat,
+        settings_all,
+        settings_raw,
         mappings,
         privs: load_privs(conn, name),
     })
+}
+
+/// IDX-11: ratakan `settings` (dan `defaults` bila `defaults`) dari response ES menjadi
+/// (key, nilai, default?). Menerima bentuk flat maupun bersarang; array tetap satu nilai.
+fn flatten_settings(v: &Value, defaults: bool) -> Vec<(String, String, bool)> {
+    fn walk(prefix: &str, v: &Value, is_default: bool, out: &mut Vec<(String, String, bool)>) {
+        match v {
+            Value::Object(map) => {
+                for (k, child) in map {
+                    let key = if prefix.is_empty() {
+                        k.clone()
+                    } else {
+                        format!("{prefix}.{k}")
+                    };
+                    walk(&key, child, is_default, out);
+                }
+            }
+            Value::Null if prefix.is_empty() => {}
+            leaf => out.push((
+                prefix.to_owned(),
+                leaf.as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| leaf.to_string()),
+                is_default,
+            )),
+        }
+    }
+    let mut out = Vec::new();
+    walk("", &v["settings"], false, &mut out);
+    if defaults {
+        walk("", &v["defaults"], true, &mut out);
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn pretty(v: &Value) -> String {
+    serde_json::to_string_pretty(v).unwrap_or_default()
 }
 
 /// IDX-38: validasi jumlah shard untuk shrink/split.
@@ -2128,6 +2235,28 @@ mod tests {
     }
 
     #[test]
+    fn flatten_settings_memisahkan_default() {
+        let nested = json!({
+            "settings": {"index": {"number_of_shards": "1", "blocks": {"write": "true"}}},
+            "defaults": {"index": {"refresh_interval": "1s", "routing": {"x": ["a", "b"]}}}
+        });
+        let all = flatten_settings(&nested, true);
+        assert!(all.contains(&("index.number_of_shards".into(), "1".into(), false)));
+        assert!(all.contains(&("index.blocks.write".into(), "true".into(), false)));
+        assert!(all.contains(&("index.refresh_interval".into(), "1s".into(), true)));
+        assert!(all.contains(&("index.routing.x".into(), "[\"a\",\"b\"]".into(), true)));
+        let explicit = flatten_settings(&nested, false);
+        assert_eq!(explicit.len(), 2);
+        assert!(explicit.iter().all(|(_, _, d)| !d));
+        let flat = json!({"settings": {"index.number_of_replicas": "0"}});
+        assert_eq!(
+            flatten_settings(&flat, true),
+            vec![("index.number_of_replicas".into(), "0".into(), false)]
+        );
+        assert!(flatten_settings(&Value::Null, true).is_empty());
+    }
+
+    #[test]
     #[ignore = "butuh cluster"]
     fn live_list_and_detail() {
         let conn = crate::es::client::live_conn().expect("env");
@@ -2137,7 +2266,7 @@ mod tests {
             .iter()
             .find(|r| !r.system() && r.status == "open")
             .unwrap();
-        let detail = load_detail(&conn, &row.name).unwrap();
+        let detail = load_detail(&conn, &row.name, false).unwrap();
         println!(
             "{} index; {}: {} settings, docs {}",
             rows.len(),
@@ -2152,6 +2281,8 @@ mod tests {
                 .any(|(k, _)| k == "index.number_of_shards")
         );
         assert!(detail.mappings.is_object());
+        let with_defaults = load_detail(&conn, &row.name, true).unwrap();
+        assert!(with_defaults.settings_all.iter().any(|(_, _, d)| *d));
         assert!(detail.stats["total"].is_object());
         println!("privilege: {:?}", detail.privs);
         assert!(detail.privs.manage, "user elastic punya manage");
