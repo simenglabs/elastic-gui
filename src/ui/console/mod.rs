@@ -599,17 +599,27 @@ impl Console {
         let hidden = fold::hidden_ranges(text, &ranges, &tab.folds);
         let galley_pos = output.galley_pos;
         let painter = ui.painter_at(output.response.rect);
+        let clip = ui.clip_rect();
+        // Rentang terurut naik: konversi char dan pencarian baris galley cukup satu lintasan.
+        let mut chars = fold::CharCounter::new(text);
+        let mut rows = fold::RowWalker::new(&output.galley);
+        let mut hidden_iter = hidden.iter().peekable();
         let mut toggle = None;
         for (i, &(start, end)) in ranges.iter().enumerate() {
+            while hidden_iter.next_if(|&&(_, he)| he <= start).is_some() {}
             // Pembuka yang berada di dalam region terlipat lain tidak terlihat.
-            if hidden.iter().any(|&(hs, he)| hs <= start && start < he) {
+            if hidden_iter.peek().is_some_and(|&&(hs, _)| hs <= start) {
                 continue;
             }
             let opener_end = text[start..].find('\n').map_or(end, |i| start + i);
-            let row = output
-                .galley
-                .pos_from_cursor(CCursor::new(byte_to_char(text, start)));
+            let row = rows.pos(chars.at(start));
             let y = galley_pos.y + row.min.y;
+            if y > clip.bottom() {
+                break;
+            }
+            if y + row.height() < clip.top() {
+                continue;
+            }
             let rect = egui::Rect::from_min_size(
                 egui::pos2(output.response.rect.left() + 22.0, y),
                 egui::vec2(GUTTER - 24.0, row.height()),
@@ -629,14 +639,11 @@ impl Console {
                 color,
             );
             if folded {
-                let close = text[..end].trim_end().chars().next_back().unwrap_or('}');
-                let at = output
-                    .galley
-                    .pos_from_cursor(CCursor::new(byte_to_char(text, opener_end)));
+                let at = rows.pos(chars.at(opener_end));
                 painter.text(
                     egui::pos2(galley_pos.x + at.max.x + 6.0, galley_pos.y + at.center().y),
                     egui::Align2::LEFT_CENTER,
-                    format!("… {close}"),
+                    format!("… {}", fold::closer(text, start)),
                     egui::FontId::monospace(widgets::MONO_SIZE),
                     ui.visuals().weak_text_color(),
                 );

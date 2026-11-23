@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 
 use eframe::egui::{
-    Color32,
-    text::{ByteIndex, LayoutJob, LayoutSection},
+    Color32, Rect, pos2,
+    text::{ByteIndex, CharIndex, Galley, LayoutJob, LayoutSection},
 };
 
 use super::parse;
@@ -124,7 +124,86 @@ pub fn hidden_ranges(
 
 /// Buang lipatan yang pembukanya tidak lagi valid setelah teks berubah.
 pub fn prune(folds: &mut BTreeSet<usize>, ranges: &[(usize, usize)]) {
-    folds.retain(|s| ranges.iter().any(|&(start, _)| start == *s));
+    // `ranges` terurut (lihat `fold_ranges`): binary search agar tidak kuadratik.
+    folds.retain(|s| ranges.binary_search_by_key(s, |&(start, _)| start).is_ok());
+}
+
+/// Kurung penutup region yang dibuka di `start`: pasangan karakter terakhir baris pembuka.
+pub fn closer(text: &str, start: usize) -> char {
+    let line = text[start..].lines().next().unwrap_or_default();
+    if line.trim_end().ends_with('[') {
+        ']'
+    } else {
+        '}'
+    }
+}
+
+/// Konversi offset byte -> indeks char untuk kueri yang naik: total O(n) per frame,
+/// bukan O(n) per kueri.
+pub struct CharCounter<'a> {
+    text: &'a str,
+    byte: usize,
+    chars: usize,
+}
+
+impl<'a> CharCounter<'a> {
+    pub fn new(text: &'a str) -> Self {
+        Self {
+            text,
+            byte: 0,
+            chars: 0,
+        }
+    }
+
+    pub fn at(&mut self, byte: usize) -> usize {
+        let byte = byte.min(self.text.len());
+        if byte < self.byte {
+            self.byte = 0;
+            self.chars = 0;
+        }
+        self.chars += self.text[self.byte..byte].chars().count();
+        self.byte = byte;
+        self.chars
+    }
+}
+
+/// Posisi cursor di galley untuk indeks char yang naik; setara
+/// `Galley::pos_from_cursor` tanpa menelusuri ulang semua baris tiap kueri.
+pub struct RowWalker<'g> {
+    galley: &'g Galley,
+    row: usize,
+    base: usize,
+}
+
+impl<'g> RowWalker<'g> {
+    pub fn new(galley: &'g Galley) -> Self {
+        Self {
+            galley,
+            row: 0,
+            base: 0,
+        }
+    }
+
+    pub fn pos(&mut self, char_index: usize) -> Rect {
+        let rows = &self.galley.rows;
+        if rows.is_empty() {
+            return Rect::ZERO;
+        }
+        if char_index < self.base {
+            self.row = 0;
+            self.base = 0;
+        }
+        while self.row + 1 < rows.len()
+            && char_index > self.base + rows[self.row].char_count_excluding_newline().0
+        {
+            self.base += rows[self.row].char_count_including_newline().0;
+            self.row += 1;
+        }
+        let row = &rows[self.row];
+        let column = char_index.saturating_sub(self.base);
+        let x = row.pos.x + row.x_offset(CharIndex(column));
+        Rect::from_min_max(pos2(x, row.min_y()), pos2(x, row.max_y()))
+    }
 }
 
 /// Sembunyikan rentang di layout: font kecil, warna transparan, tinggi baris nol.
@@ -299,6 +378,54 @@ mod tests {
     }
 
     #[test]
+    fn closer_follows_opener_not_closing_line() {
+        let text = "GET /x\n{\n  \"must\": [\n    {\n      \"a\": 1\n    }, {\n      \"b\": 2\n    }\n  ],\n  \"x\": {\n    \"y\": 1\n  },\n  \"z\": 1\n}\n";
+        let ranges = fold_ranges(text);
+        let closers: Vec<(String, char)> = ranges
+            .iter()
+            .map(|&(s, _)| {
+                let first = text[s..]
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned();
+                (first, closer(text, s))
+            })
+            .collect();
+        assert_eq!(
+            closers,
+            vec![
+                ("{".into(), '}'),
+                ("\"must\": [".into(), ']'),
+                ("{".into(), '}'),
+                ("}, {".into(), '}'),
+                ("\"x\": {".into(), '}'),
+            ]
+        );
+        // Baris penutup `}, {` / `],` / `},` tetap menghasilkan region yang benar.
+        assert!(text[..ranges[1].1].ends_with("  ],"));
+        assert!(text[..ranges[2].1].ends_with("    }, {"));
+        assert!(text[..ranges[4].1].ends_with("  },"));
+    }
+
+    #[test]
+    fn char_counter_matches_naive_conversion() {
+        let text = "é{\n  \"ñ\": [\n  ]\n}\nü";
+        let mut counter = CharCounter::new(text);
+        let offsets: Vec<usize> = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain([text.len()])
+            .collect();
+        for &b in &offsets {
+            assert_eq!(counter.at(b), text[..b].chars().count());
+        }
+        // Kueri mundur tetap benar (reset).
+        assert_eq!(counter.at(offsets[2]), 2);
+    }
+
+    #[test]
     fn hidden_rows_collapse_in_galley() {
         let text = "GET /x\n{\n  \"a\": {\n\n    \"b\": 1\n  }\n}\nGET /y\n";
         let ranges = fold_ranges(text);
@@ -311,6 +438,26 @@ mod tests {
             let galley = ui.fonts_mut(|f| f.layout_job(job.clone()));
             assert_eq!(galley.text(), text);
             heights = galley.rows.iter().map(|r| r.height()).collect();
+            // RowWalker setara pos_from_cursor untuk setiap indeks char (naik).
+            let mut walker = RowWalker::new(&galley);
+            for c in 0..=text.chars().count() {
+                let expected = galley.pos_from_cursor(eframe::egui::text::CCursor::new(c));
+                assert_eq!(walker.pos(c), expected, "char {c}");
+            }
+            // Teks yang di-wrap: batas baris wrap juga cocok.
+            let mut wrapped = crate::widgets::highlight(
+                "GET /x\n{\n  \"aaaa bbbb cccc dddd eeee ffff gggg\": 1\n}\n",
+                crate::widgets::Lang::Console,
+                true,
+            );
+            wrapped.wrap.max_width = 60.0;
+            let galley = ui.fonts_mut(|f| f.layout_job(wrapped));
+            assert!(galley.rows.len() > 5);
+            let mut walker = RowWalker::new(&galley);
+            for c in 0..=galley.text().chars().count() {
+                let expected = galley.pos_from_cursor(eframe::egui::text::CCursor::new(c));
+                assert_eq!(walker.pos(c), expected, "wrap char {c}");
+            }
         });
         output.textures_delta.clear();
         // GET /x, `{`, 5 baris tersembunyi, GET /y, baris kosong terakhir.
