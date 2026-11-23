@@ -106,7 +106,7 @@ pub struct Discover {
     save_name: String,
     history: Vec<String>,
     /// DIS-43: top values dari aggregation di seluruh rentang.
-    top_request: Option<String>,
+    top_request: Option<(String, bool)>,
     top_accurate: Option<TopValues>,
     top_pending: Option<Pending<TopValues>>,
     /// DIS-38: dokumen sekitar (id anchor, lebih baru, lebih lama).
@@ -167,7 +167,49 @@ pub(crate) struct SavedSearch {
 
 /// Hasil yang dikaitkan dengan kunci (pola/field) saat diminta.
 type Keyed<T> = (String, Result<T, String>);
-type TopValues = Keyed<Vec<(String, u64)>>;
+type TopValues = Keyed<TopResult>;
+
+/// DIS-43: hasil mode akurat: terms, plus stats untuk field numeric.
+#[derive(Debug, Clone, Default)]
+struct TopResult {
+    terms: Vec<(String, u64)>,
+    stats: Option<Stats>,
+}
+
+/// DIS-43: ringkasan aggregation `stats`; min/max/avg `None` bila tanpa dokumen.
+#[derive(Debug, Clone, PartialEq)]
+struct Stats {
+    count: u64,
+    min: Option<f64>,
+    max: Option<f64>,
+    avg: Option<f64>,
+    sum: f64,
+}
+
+/// DIS-43: parse `aggregations.st` dari response; `None` bila aggregation tidak ada.
+fn parse_stats(v: &Value) -> Option<Stats> {
+    let st = v["aggregations"].get("st")?;
+    Some(Stats {
+        count: st["count"].as_u64()?,
+        min: st["min"].as_f64(),
+        max: st["max"].as_f64(),
+        avg: st["avg"].as_f64(),
+        sum: st["sum"].as_f64().unwrap_or(0.0),
+    })
+}
+
+/// Bilangan bulat diformat ribuan; pecahan 2 desimal.
+fn format_stat(x: f64) -> String {
+    if x.fract() == 0.0 && x.abs() < 1e18 {
+        if x < 0.0 {
+            format!("-{}", widgets::format_count(x.abs() as u64))
+        } else {
+            widgets::format_count(x as u64)
+        }
+    } else {
+        format!("{x:.2}")
+    }
+}
 /// (id anchor, (lebih baru, lebih lama))
 type Around = Keyed<(Vec<Value>, Vec<Value>)>;
 /// ((field, awalan), nilai)
@@ -294,8 +336,8 @@ impl Discover {
         if let Some(r) = poll(&mut self.top_pending) {
             self.top_accurate = Some(r);
         }
-        if let Some(field) = self.top_request.take() {
-            self.load_top(&ctx, cx.conn, field);
+        if let Some((field, numeric)) = self.top_request.take() {
+            self.load_top(&ctx, cx.conn, field, numeric);
         }
         let fields: Vec<Field> = match cx.catalog.fields(&ctx, cx.conn, &self.pattern) {
             Some(Ok(fields)) => fields.clone(),
@@ -872,20 +914,24 @@ impl Discover {
         ui.separator();
     }
 
-    fn load_top(&mut self, ctx: &egui::Context, conn: &Arc<Conn>, field: String) {
+    fn load_top(&mut self, ctx: &egui::Context, conn: &Arc<Conn>, field: String, numeric: bool) {
         let query = self
             .last_body
             .as_ref()
             .map(|b| b["query"].clone())
             .unwrap_or_else(|| json!({"match_all": {}}));
-        let body = json!({"size": 0, "query": query, "aggs": {"top": {"terms": {"field": field, "size": 5}}}});
+        let mut body = json!({"size": 0, "query": query, "aggs": {"top": {"terms": {"field": field, "size": 5}}}});
+        if numeric {
+            // DIS-43: stats dalam request yang sama untuk field numeric.
+            body["aggs"]["st"] = json!({"stats": {"field": field}});
+        }
         let (conn, pattern) = (conn.clone(), self.pattern.clone());
         self.top_accurate = None;
         self.top_pending = Some(Pending::spawn(ctx, move || {
             let result = conn
                 .json("POST", &format!("/{pattern}/_search"), Some(&body))
-                .map(|v| {
-                    v["aggregations"]["top"]["buckets"]
+                .map(|v| TopResult {
+                    terms: v["aggregations"]["top"]["buckets"]
                         .as_array()
                         .into_iter()
                         .flatten()
@@ -895,7 +941,8 @@ impl Discover {
                                 b["doc_count"].as_u64().unwrap_or(0),
                             )
                         })
-                        .collect()
+                        .collect(),
+                    stats: parse_stats(&v),
                 });
             (field, result)
         }));
@@ -1137,15 +1184,26 @@ impl Discover {
                     .on_hover_text("terms aggregation dengan query dan filter saat ini")
                     .clicked()
                 {
-                    self.top_request = Some(f.name.clone());
+                    self.top_request = Some((f.name.clone(), f.is_numeric()));
                 }
                 if let Some((name, result)) = &self.top_accurate
                     && *name == f.name
                 {
                     match result {
-                        Ok(list) => {
+                        Ok(res) => {
+                            if let Some(st) = &res.stats {
+                                let opt = |x: Option<f64>| x.map_or("-".to_string(), format_stat);
+                                ui.weak(format!(
+                                    "min {} · max {} · avg {} · sum {} · count {}",
+                                    opt(st.min),
+                                    opt(st.max),
+                                    st.avg.map_or("-".to_string(), |a| format!("{a:.2}")),
+                                    format_stat(st.sum),
+                                    widgets::format_count(st.count)
+                                ));
+                            }
                             ui.weak("Top 5 akurat:");
-                            for (value, count) in list.clone() {
+                            for (value, count) in res.terms.clone() {
                                 ui.horizontal(|ui| {
                                     if ui.small_button("+").clicked() {
                                         self.filters.push(Filter::is(&f.name, &value, false));
@@ -2457,6 +2515,68 @@ mod tests {
             Some("title.keyword")
         );
         assert_eq!(sort_target("body", &fields), None);
+    }
+
+    #[test]
+    fn parse_stats_full_response() {
+        let v = json!({"aggregations": {"st": {"count": 3, "min": 1.0, "max": 5.0, "avg": 3.0, "sum": 9.0}}});
+        assert_eq!(
+            parse_stats(&v),
+            Some(Stats {
+                count: 3,
+                min: Some(1.0),
+                max: Some(5.0),
+                avg: Some(3.0),
+                sum: 9.0
+            })
+        );
+    }
+
+    #[test]
+    fn parse_stats_without_aggregation() {
+        assert_eq!(parse_stats(&json!({"aggregations": {"top": {}}})), None);
+        assert_eq!(parse_stats(&json!({})), None);
+    }
+
+    #[test]
+    fn parse_stats_empty_field() {
+        let v = json!({"aggregations": {"st": {"count": 0, "min": null, "max": null, "avg": null, "sum": 0.0}}});
+        let st = parse_stats(&v).unwrap();
+        assert_eq!(st.count, 0);
+        assert_eq!(st.min, None);
+        assert_eq!(st.max, None);
+    }
+
+    #[test]
+    fn format_stat_integers_and_fractions() {
+        assert_eq!(format_stat(1234567.0), "1.234.567");
+        assert_eq!(format_stat(-1500.0), "-1.500");
+        assert_eq!(format_stat(2.5), "2.50");
+    }
+
+    #[test]
+    #[ignore = "butuh cluster"]
+    fn live_numeric_stats() {
+        let conn = crate::es::client::live_conn().expect("env");
+        let pattern = std::env::var("LIVE_PATTERN").unwrap_or_else(|_| "*".into());
+        let fields = crate::es::catalog::parse_field_caps(
+            &conn
+                .get(&format!("/{pattern}/_field_caps?fields=*"))
+                .unwrap(),
+        );
+        let Some(f) = fields.iter().find(|f| f.is_numeric() && f.aggregatable) else {
+            println!("tidak ada field numeric aggregatable di {pattern}, dilewati");
+            return;
+        };
+        let body = json!({"size": 0, "query": {"match_all": {}}, "aggs": {"st": {"stats": {"field": f.name}}}});
+        let v = conn
+            .json("POST", &format!("/{pattern}/_search"), Some(&body))
+            .unwrap();
+        let st = parse_stats(&v).expect("aggregation st");
+        println!("{}: {st:?}", f.name);
+        if st.count > 0 {
+            assert!(st.min.unwrap() <= st.max.unwrap());
+        }
     }
 
     #[test]
