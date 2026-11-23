@@ -8,7 +8,8 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::es::Conn;
 use crate::es::catalog::Catalog;
-use crate::profile::{Profile, Store, secret};
+use crate::i18n::{self, Lang, t, tf};
+use crate::profile::{AppSettings, Profile, Store, secret};
 use crate::task::{Pending, poll};
 use crate::ui::{
     self, Ctx, Nav, console::Console, dashboard::Dashboard, discover::Discover, indices::Indices,
@@ -40,8 +41,8 @@ impl Module {
             Module::Discover => "Discover",
             Module::Console => "Dev Tools",
             Module::Dashboard => "Dashboard",
-            Module::Indices => "Index",
-            Module::Profiles => "Cluster",
+            Module::Indices => t("Index"),
+            Module::Profiles => t("Cluster"),
         }
     }
 }
@@ -196,6 +197,7 @@ pub mod timing {
 
 pub struct DesktopApp {
     store: Store,
+    settings: AppSettings,
     profiles: Vec<Profile>,
     active: Option<String>,
     module: Module,
@@ -220,6 +222,8 @@ impl DesktopApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         let store = Store::open();
+        let settings = store.load_settings();
+        i18n::set_lang(settings.lang);
         let mut profiles = store.load_profiles();
         if let Some((env_profile, env_secret)) = Profile::from_env() {
             if let Some(value) = env_secret {
@@ -235,6 +239,7 @@ impl DesktopApp {
         };
         Self {
             store,
+            settings,
             profiles,
             active,
             module,
@@ -242,6 +247,15 @@ impl DesktopApp {
             tabs: Vec::new(),
             palette: None,
             profile_ui: Profiles::default(),
+        }
+    }
+
+    /// X-05: berlaku mulai frame berikutnya dan disimpan ke `settings.json`.
+    fn set_lang(&mut self, lang: Lang) {
+        i18n::set_lang(lang);
+        self.settings.lang = lang;
+        if let Err(err) = self.store.save_settings(&self.settings) {
+            eprintln!("gagal menyimpan settings.json: {err}");
         }
     }
 
@@ -272,7 +286,7 @@ impl DesktopApp {
             && !self.tabs.contains(&(id.clone(), self.module))
             && ui
                 .small_button("+ tab")
-                .on_hover_text("Simpan cluster + modul ini sebagai tab")
+                .on_hover_text(t("Simpan cluster + modul ini sebagai tab"))
                 .clicked()
         {
             self.tabs.push((id, self.module));
@@ -321,7 +335,7 @@ impl DesktopApp {
                     .map_or(0, |c| c.inflight());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if running > 0 {
-                        ui.small(format!("{running} request berjalan"));
+                        ui.small(tf("{0} request berjalan", &[&running]));
                         ui.spinner();
                         ui.ctx().request_repaint_after(Duration::from_millis(250));
                     } else {
@@ -339,7 +353,7 @@ impl DesktopApp {
         };
         let mut commands: Vec<(String, Command)> = Module::ALL
             .iter()
-            .map(|m| (format!("Buka {}", m.label()), Command::Module(*m)))
+            .map(|m| (tf("Buka {0}", &[&m.label()]), Command::Module(*m)))
             .collect();
         commands.extend(self.profiles.iter().map(|p| {
             (
@@ -347,7 +361,7 @@ impl DesktopApp {
                 Command::Profile(p.id.clone()),
             )
         }));
-        commands.push(("Ganti tema terang/gelap".into(), Command::Theme));
+        commands.push((t("Ganti tema terang/gelap").into(), Command::Theme));
         if let Some(ws) = self
             .active
             .as_ref()
@@ -398,7 +412,7 @@ impl DesktopApp {
             ui.set_width(520.0);
             let r = ui.add(
                 egui::TextEdit::singleline(query)
-                    .hint_text("Ketik perintah, cluster, atau nama index…")
+                    .hint_text(t("Ketik perintah, cluster, atau nama index…"))
                     .desired_width(f32::INFINITY),
             );
             r.request_focus();
@@ -408,9 +422,9 @@ impl DesktopApp {
                 }
             }
             if matches.is_empty() {
-                ui.weak("Tidak ada yang cocok.");
+                ui.weak(t("Tidak ada yang cocok."));
             }
-            ui.weak("↑↓ pilih · Enter jalankan · Esc tutup");
+            ui.weak(t("↑↓ pilih · Enter jalankan · Esc tutup"));
         });
         if response.should_close() {
             close = true;
@@ -462,7 +476,7 @@ impl DesktopApp {
                 ui.separator();
                 let current = active_profile
                     .as_ref()
-                    .map_or("Pilih cluster".to_owned(), |p| p.name.clone());
+                    .map_or(t("Pilih cluster").to_owned(), |p| p.name.clone());
                 let mut switch_to = None;
                 egui::ComboBox::from_id_salt("cluster_switcher")
                     .selected_text(current)
@@ -517,7 +531,7 @@ impl DesktopApp {
                             ui.weak(format!("{} · v{}{user}", info.name, info.version));
                         }
                         Some(Err(err)) => {
-                            ui.colored_label(ui.visuals().error_fg_color, "Tidak terhubung")
+                            ui.colored_label(ui.visuals().error_fg_color, t("Tidak terhubung"))
                                 .on_hover_text(err);
                         }
                         None => {
@@ -533,17 +547,17 @@ impl DesktopApp {
                     }
                     if profile.insecure {
                         ui.label(
-                            RichText::new("TLS TIDAK DIVERIFIKASI")
+                            RichText::new(t("TLS TIDAK DIVERIFIKASI"))
                                 .color(ui.visuals().warn_fg_color),
                         )
-                        .on_hover_text("Verifikasi sertifikat dimatikan di profile ini.");
+                        .on_hover_text(t("Verifikasi sertifikat dimatikan di profile ini."));
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let dark = ui.visuals().dark_mode;
                     if ui
                         .small_button(if dark { "☀" } else { "🌙" })
-                        .on_hover_text("Ganti tema")
+                        .on_hover_text(t("Ganti tema"))
                         .clicked()
                     {
                         ui.ctx().set_visuals(if dark {
@@ -551,6 +565,18 @@ impl DesktopApp {
                         } else {
                             egui::Visuals::dark()
                         });
+                    }
+                    ui.separator();
+                    // X-05: urutan dibalik karena layout kanan-ke-kiri, tampil "ID | EN".
+                    for lang in Lang::ALL.into_iter().rev() {
+                        if ui
+                            .selectable_label(i18n::lang() == lang, lang.code())
+                            .on_hover_text(t("Bahasa antarmuka"))
+                            .clicked()
+                        {
+                            self.set_lang(lang);
+                            ui.ctx().request_repaint();
+                        }
                     }
                 });
             });
@@ -615,9 +641,9 @@ impl eframe::App for DesktopApp {
             .cloned()
         else {
             egui::CentralPanel::default().show(ui, |ui| {
-                ui.heading("Belum ada cluster");
-                ui.label("Buat profile cluster di menu Cluster terlebih dahulu.");
-                if ui.button("Buat profile").clicked() {
+                ui.heading(t("Belum ada cluster"));
+                ui.label(t("Buat profile cluster di menu Cluster terlebih dahulu."));
+                if ui.button(t("Buat profile")).clicked() {
                     self.module = Module::Profiles;
                 }
             });
@@ -637,7 +663,7 @@ impl eframe::App for DesktopApp {
                 egui::CentralPanel::default().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Menyiapkan koneksi…");
+                        ui.label(t("Menyiapkan koneksi…"));
                     });
                 });
                 return;
@@ -645,8 +671,8 @@ impl eframe::App for DesktopApp {
             Some(Err(err)) => {
                 let err = err.clone();
                 egui::CentralPanel::default().show(ui, |ui| {
-                    crate::widgets::error_box(ui, &format!("Profile tidak bisa dipakai: {err}"));
-                    if ui.button("Edit profile").clicked() {
+                    crate::widgets::error_box(ui, &tf("Profile tidak bisa dipakai: {0}", &[&err]));
+                    if ui.button(t("Edit profile")).clicked() {
                         self.module = Module::Profiles;
                     }
                 });
@@ -657,14 +683,14 @@ impl eframe::App for DesktopApp {
             let err = err.clone();
             egui::Panel::top("conn_error").show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    crate::widgets::error_box(ui, &format!("Gagal terhubung: {err}"));
+                    crate::widgets::error_box(ui, &tf("Gagal terhubung: {0}", &[&err]));
                 });
                 ui.horizontal(|ui| {
-                    if ui.button("Coba lagi").clicked() {
+                    if ui.button(t("Coba lagi")).clicked() {
                         ws.info = None;
                         ws.health_at = None;
                     }
-                    if err.contains("401") && ui.button("Edit profile").clicked() {
+                    if err.contains("401") && ui.button(t("Edit profile")).clicked() {
                         self.module = Module::Profiles;
                     }
                 });
@@ -702,5 +728,56 @@ impl eframe::App for DesktopApp {
             }
             None => {}
         }
+    }
+}
+
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("Index", "Indices"),
+    ("Cluster", "Clusters"),
+    (
+        "Simpan cluster + modul ini sebagai tab",
+        "Save this cluster + module as a tab",
+    ),
+    ("{0} request berjalan", "{0} requests running"),
+    ("Buka {0}", "Open {0}"),
+    ("Ganti tema terang/gelap", "Toggle light/dark theme"),
+    (
+        "Ketik perintah, cluster, atau nama index…",
+        "Type a command, cluster, or index name…",
+    ),
+    ("Tidak ada yang cocok.", "No matches."),
+    (
+        "↑↓ pilih · Enter jalankan · Esc tutup",
+        "↑↓ select · Enter run · Esc close",
+    ),
+    ("Pilih cluster", "Select cluster"),
+    ("Tidak terhubung", "Not connected"),
+    ("TLS TIDAK DIVERIFIKASI", "TLS NOT VERIFIED"),
+    (
+        "Verifikasi sertifikat dimatikan di profile ini.",
+        "Certificate verification is disabled for this profile.",
+    ),
+    ("Ganti tema", "Toggle theme"),
+    ("Belum ada cluster", "No clusters yet"),
+    (
+        "Buat profile cluster di menu Cluster terlebih dahulu.",
+        "Create a cluster profile in the Clusters menu first.",
+    ),
+    ("Buat profile", "Create profile"),
+    ("Menyiapkan koneksi…", "Preparing connection…"),
+    (
+        "Profile tidak bisa dipakai: {0}",
+        "Profile cannot be used: {0}",
+    ),
+    ("Gagal terhubung: {0}", "Connection failed: {0}"),
+    ("Coba lagi", "Retry"),
+];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("app.rs"), super::EN);
     }
 }

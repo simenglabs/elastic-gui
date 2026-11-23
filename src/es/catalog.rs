@@ -26,7 +26,7 @@ impl TargetKind {
             TargetKind::Index => "index",
             TargetKind::Alias => "alias",
             TargetKind::DataStream => "data stream",
-            TargetKind::Remote => "remote cluster",
+            TargetKind::Remote => crate::i18n::t("cluster remote"),
         }
     }
 }
@@ -311,9 +311,17 @@ pub fn parse_field_caps(value: &Value) -> Vec<Field> {
     out
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[("cluster remote", "remote cluster")];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn label_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("catalog.rs"), EN);
+    }
 
     #[test]
     fn parses_field_caps() {

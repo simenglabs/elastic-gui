@@ -45,9 +45,9 @@ impl FilterOp {
     pub fn label(self) -> &'static str {
         match self {
             FilterOp::Is => "is",
-            FilterOp::OneOf => "is one of",
+            FilterOp::OneOf => crate::i18n::t("salah satu dari"),
             FilterOp::Exists => "exists",
-            FilterOp::Between => "between",
+            FilterOp::Between => crate::i18n::t("di antara"),
             FilterOp::Dsl => "DSL",
         }
     }
@@ -345,9 +345,17 @@ pub fn display(value: &Value) -> String {
     }
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[("salah satu dari", "is one of"), ("di antara", "between")];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn label_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("query.rs"), EN);
+    }
 
     #[test]
     fn builds_bool_query() {

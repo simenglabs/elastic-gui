@@ -2,6 +2,7 @@
 
 mod app;
 mod es;
+mod i18n;
 mod profile;
 mod task;
 mod ui;

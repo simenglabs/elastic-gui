@@ -4,6 +4,7 @@ use eframe::egui::{self, RichText};
 
 use crate::es::catalog::Field;
 use crate::es::query::{Filter, FilterOp};
+use crate::i18n::t;
 
 #[derive(Default)]
 pub struct Draft {
@@ -34,7 +35,11 @@ pub fn filter_bar(
             }
             ui.menu_button(text, |ui| {
                 if ui
-                    .button(if f.enabled { "Nonaktifkan" } else { "Aktifkan" })
+                    .button(if f.enabled {
+                        t("Nonaktifkan")
+                    } else {
+                        t("Aktifkan")
+                    })
                     .clicked()
                 {
                     f.enabled = !f.enabled;
@@ -43,9 +48,9 @@ pub fn filter_bar(
                 }
                 if ui
                     .button(if f.negate {
-                        "Hapus negasi"
+                        t("Hapus negasi")
                     } else {
-                        "Negasikan (NOT)"
+                        t("Negasikan (NOT)")
                     })
                     .clicked()
                 {
@@ -55,16 +60,16 @@ pub fn filter_bar(
                 }
                 if ui
                     .button(if f.pinned {
-                        "Lepas pin"
+                        t("Lepas pin")
                     } else {
-                        "Pin (tetap saat ganti sumber)"
+                        t("Pin (tetap saat ganti sumber)")
                     })
                     .clicked()
                 {
                     f.pinned = !f.pinned;
                     ui.close();
                 }
-                if f.op != FilterOp::Dsl && ui.button("Edit sebagai DSL").clicked() {
+                if f.op != FilterOp::Dsl && ui.button(t("Edit sebagai DSL")).clicked() {
                     f.make_dsl();
                 }
                 if f.op == FilterOp::Dsl {
@@ -84,11 +89,11 @@ pub fn filter_bar(
                     if !valid {
                         ui.colored_label(
                             ui.visuals().error_fg_color,
-                            "Harus objek JSON query yang valid.",
+                            t("Harus objek JSON query yang valid."),
                         );
                     }
                     if ui
-                        .add_enabled(valid, egui::Button::new("Terapkan"))
+                        .add_enabled(valid, egui::Button::new(t("Terapkan")))
                         .clicked()
                     {
                         f.value = text.clone();
@@ -99,7 +104,7 @@ pub fn filter_bar(
                         ui.data_mut(|d| d.insert_temp(id, text));
                     }
                 }
-                if ui.button("Hapus").clicked() {
+                if ui.button(t("Hapus")).clicked() {
                     remove = Some(i);
                     ui.close();
                 }
@@ -111,7 +116,7 @@ pub fn filter_bar(
                 ui.close();
             }
         });
-        if filters.iter().any(|f| !f.pinned) && ui.small_button("Hapus semua").clicked() {
+        if filters.iter().any(|f| !f.pinned) && ui.small_button(t("Hapus semua")).clicked() {
             filters.retain(|f| f.pinned);
             changed = true;
         }
@@ -131,7 +136,7 @@ fn add_form(
 ) -> bool {
     ui.set_min_width(340.0);
     ui.label("Field");
-    ui.add(egui::TextEdit::singleline(&mut draft.search).hint_text("Cari field…"));
+    ui.add(egui::TextEdit::singleline(&mut draft.search).hint_text(t("Cari field…")));
     egui::ScrollArea::vertical()
         .max_height(180.0)
         .id_salt("filter_fields")
@@ -149,7 +154,7 @@ fn add_form(
             }
         });
     if fields.is_empty() {
-        ui.add(egui::TextEdit::singleline(&mut draft.field).hint_text("nama field"));
+        ui.add(egui::TextEdit::singleline(&mut draft.field).hint_text(t("nama field")));
     }
     let op = draft.op.get_or_insert(FilterOp::Is);
     ui.horizontal(|ui| {
@@ -165,21 +170,21 @@ fn add_form(
     let op = *op;
     match op {
         FilterOp::Is => {
-            ui.add(egui::TextEdit::singleline(&mut draft.value).hint_text("nilai"));
+            ui.add(egui::TextEdit::singleline(&mut draft.value).hint_text(t("nilai")));
         }
         FilterOp::OneOf => {
-            ui.add(egui::TextEdit::singleline(&mut draft.value).hint_text("nilai1, nilai2"));
+            ui.add(egui::TextEdit::singleline(&mut draft.value).hint_text(t("nilai1, nilai2")));
         }
         FilterOp::Between => {
             ui.horizontal(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut draft.value)
-                        .hint_text("dari")
+                        .hint_text(t("dari"))
                         .desired_width(140.0),
                 );
                 ui.add(
                     egui::TextEdit::singleline(&mut draft.value2)
-                        .hint_text("sampai")
+                        .hint_text(t("sampai"))
                         .desired_width(140.0),
                 );
             });
@@ -192,7 +197,7 @@ fn add_form(
                     .desired_rows(5)
                     .hint_text("{\"term\": {\"status\": \"active\"}}"),
             );
-            ui.weak("Field diabaikan untuk filter DSL.");
+            ui.weak(t("Field diabaikan untuk filter DSL."));
         }
     }
     let ready = match op {
@@ -205,7 +210,10 @@ fn add_form(
         FilterOp::Between => !draft.value.trim().is_empty() || !draft.value2.trim().is_empty(),
         FilterOp::Exists | FilterOp::Dsl => true,
     };
-    if ui.add_enabled(ready, egui::Button::new("Tambah")).clicked() {
+    if ui
+        .add_enabled(ready, egui::Button::new(t("Tambah")))
+        .clicked()
+    {
         filters.push(Filter {
             field: draft.field.trim().to_owned(),
             op,
@@ -219,4 +227,42 @@ fn add_form(
         return true;
     }
     false
+}
+
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("Nonaktifkan", "Disable"),
+    ("Aktifkan", "Enable"),
+    ("Hapus negasi", "Remove negation"),
+    ("Negasikan (NOT)", "Negate (NOT)"),
+    ("Lepas pin", "Unpin"),
+    (
+        "Pin (tetap saat ganti sumber)",
+        "Pin (keep when switching source)",
+    ),
+    ("Edit sebagai DSL", "Edit as DSL"),
+    (
+        "Harus objek JSON query yang valid.",
+        "Must be a valid JSON query object.",
+    ),
+    ("Hapus semua", "Clear all"),
+    ("Cari field…", "Search fields…"),
+    ("nama field", "field name"),
+    ("nilai", "value"),
+    ("nilai1, nilai2", "value1, value2"),
+    ("dari", "from"),
+    ("sampai", "to"),
+    (
+        "Field diabaikan untuk filter DSL.",
+        "Field is ignored for DSL filters.",
+    ),
+    ("Tambah", "Add"),
+];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("filters.rs"), super::EN);
+    }
 }

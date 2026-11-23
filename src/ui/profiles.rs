@@ -5,6 +5,7 @@ use std::sync::Arc;
 use eframe::egui::{self, RichText};
 
 use crate::es::Conn;
+use crate::i18n::{t, tf};
 use crate::profile::{AuthKind, Env, Profile, Store, secret};
 use crate::task::{Pending, poll};
 use crate::widgets::{self, Confirm};
@@ -83,12 +84,12 @@ impl Profiles {
             .resizable(true)
             .default_size(240.0)
             .show(ui, |ui| {
-                ui.heading("Cluster");
+                ui.heading(t("Cluster"));
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if ui
-                        .button("Ekspor…")
-                        .on_hover_text("Tanpa password/API key")
+                        .button(t("Ekspor…"))
+                        .on_hover_text(t("Tanpa password/API key"))
                         .clicked()
                         && let Some(path) = rfd::FileDialog::new()
                             .set_file_name("elastic-gui-profiles.json")
@@ -99,11 +100,11 @@ impl Profiles {
                         let text = serde_json::to_string_pretty(&list).unwrap_or_default();
                         self.message = Some(
                             std::fs::write(&path, text)
-                                .map(|_| format!("{} profile diekspor (tanpa secret).", list.len()))
+                                .map(|_| tf("{0} profile diekspor (tanpa secret).", &[&list.len()]))
                                 .map_err(|e| e.to_string()),
                         );
                     }
-                    if ui.button("Impor…").clicked()
+                    if ui.button(t("Impor…")).clicked()
                         && let Some(path) = rfd::FileDialog::new()
                             .add_filter("JSON", &["json"])
                             .pick_file()
@@ -111,7 +112,7 @@ impl Profiles {
                         self.message = Some(import_profiles(&path, profiles, store));
                     }
                 });
-                if ui.button("+ Profile baru").clicked() {
+                if ui.button(t("+ Profile baru")).clicked() {
                     let profile = Profile::default();
                     self.selected = Some(profile.id.clone());
                     self.draft = Some(profile);
@@ -152,20 +153,22 @@ impl Profiles {
     ) {
         let stored = self.stored_secret(ui.ctx());
         let Some(draft) = &mut self.draft else {
-            ui.weak("Pilih profile di kiri atau buat profile baru.");
+            ui.weak(t("Pilih profile di kiri atau buat profile baru."));
             return;
         };
         let is_new = !profiles.iter().any(|p| p.id == draft.id);
         ui.heading(if is_new {
-            "Profile baru"
+            t("Profile baru")
         } else {
-            "Edit profile"
+            t("Edit profile")
         });
         if draft.ephemeral {
             widgets::warn_box(
                 ui,
-                "Profile ini berasal dari environment variable (ELASTIC_URL) dan tidak disimpan. \
-                 Klik \"Simpan\" untuk menjadikannya profile permanen.",
+                t(
+                    "Profile ini berasal dari environment variable (ELASTIC_URL) dan tidak disimpan. \
+                   Klik \"Simpan\" untuk menjadikannya profile permanen.",
+                ),
             );
         }
         ui.add_space(6.0);
@@ -173,7 +176,7 @@ impl Profiles {
             .num_columns(2)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
-                ui.label("Nama");
+                ui.label(t("Nama"));
                 ui.text_edit_singleline(&mut draft.name);
                 ui.end_row();
 
@@ -185,7 +188,7 @@ impl Profiles {
                 });
                 ui.end_row();
 
-                ui.label("URL node");
+                ui.label(t("URL node"));
                 ui.vertical(|ui| {
                     let mut remove = None;
                     for (i, url) in draft.urls.iter_mut().enumerate() {
@@ -205,7 +208,7 @@ impl Profiles {
                     }
                     if ui
                         .small_button("+ node")
-                        .on_hover_text("Node cadangan untuk failover")
+                        .on_hover_text(t("Node cadangan untuk failover"))
                         .clicked()
                     {
                         draft.urls.push(String::new());
@@ -213,7 +216,7 @@ impl Profiles {
                 });
                 ui.end_row();
 
-                ui.label("Autentikasi");
+                ui.label(t("Autentikasi"));
                 egui::ComboBox::from_id_salt("auth_kind")
                     .selected_text(draft.auth.label())
                     .show_ui(ui, |ui| {
@@ -236,9 +239,9 @@ impl Profiles {
                     };
                     ui.label(label);
                     let hint = match &stored {
-                        Some(Some(_)) => "•••••• (tersimpan, isi untuk mengganti)",
+                        Some(Some(_)) => t("•••••• (tersimpan, isi untuk mengganti)"),
                         Some(None) => "",
-                        None => "memuat secret tersimpan…",
+                        None => t("memuat secret tersimpan…"),
                     };
                     ui.add(
                         egui::TextEdit::singleline(&mut self.secret_input)
@@ -254,9 +257,9 @@ impl Profiles {
                     ui.add(
                         egui::TextEdit::singleline(&mut draft.ca_cert_path)
                             .desired_width(300.0)
-                            .hint_text("kosong = CA sistem"),
+                            .hint_text(t("kosong = CA sistem")),
                     );
-                    if ui.button("Pilih…").clicked()
+                    if ui.button(t("Pilih…")).clicked()
                         && let Some(path) = rfd::FileDialog::new()
                             .add_filter("PEM", &["pem", "crt", "cer"])
                             .pick_file()
@@ -266,19 +269,19 @@ impl Profiles {
                 });
                 ui.end_row();
 
-                ui.label("Fingerprint CA");
+                ui.label(t("Fingerprint CA"));
                 ui.add(
                     egui::TextEdit::singleline(&mut draft.ca_fingerprint)
                         .desired_width(360.0)
-                        .hint_text("SHA-256, mis. dari output setup ES (opsional)"),
+                        .hint_text(t("SHA-256, mis. dari output setup ES (opsional)")),
                 )
-                .on_hover_text("Jika diisi, sertifikat server diterima hanya bila fingerprint-nya cocok (menggantikan CA cert).");
+                .on_hover_text(t("Jika diisi, sertifikat server diterima hanya bila fingerprint-nya cocok (menggantikan CA cert)."));
                 ui.end_row();
 
                 ui.label("Client cert (mTLS)");
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut draft.client_cert_path).desired_width(240.0).hint_text("cert PEM"));
-                    if ui.button("Pilih…").clicked()
+                    if ui.button(t("Pilih…")).clicked()
                         && let Some(path) = rfd::FileDialog::new().pick_file()
                     {
                         draft.client_cert_path = path.display().to_string();
@@ -289,7 +292,7 @@ impl Profiles {
                 ui.label("Client key (mTLS)");
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut draft.client_key_path).desired_width(240.0).hint_text("private key PEM"));
-                    if ui.button("Pilih…").clicked()
+                    if ui.button(t("Pilih…")).clicked()
                         && let Some(path) = rfd::FileDialog::new().pick_file()
                     {
                         draft.client_key_path = path.display().to_string();
@@ -300,7 +303,7 @@ impl Profiles {
                 ui.label("Cloud ID");
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut self.cloud_id).desired_width(300.0).hint_text("deployment:base64…"));
-                    if ui.button("Isi URL").clicked() {
+                    if ui.button(t("Isi URL")).clicked() {
                         match crate::es::tls::decode_cloud_id(&self.cloud_id) {
                             Ok(url) => {
                                 draft.urls = vec![url];
@@ -315,11 +318,11 @@ impl Profiles {
                 ui.label("TLS");
                 ui.checkbox(
                     &mut draft.insecure,
-                    "Lewati verifikasi sertifikat (tidak aman)",
+                    t("Lewati verifikasi sertifikat (tidak aman)"),
                 );
                 ui.end_row();
 
-                ui.label("Timeout (detik)");
+                ui.label(t("Timeout (detik)"));
                 ui.add(egui::DragValue::new(&mut draft.timeout_secs).range(1..=600));
                 ui.end_row();
 
@@ -327,11 +330,11 @@ impl Profiles {
                 ui.add(
                     egui::TextEdit::singleline(&mut draft.proxy)
                         .desired_width(360.0)
-                        .hint_text("http://user:pass@proxy:3128 (kosong = proxy sistem)"),
+                        .hint_text(t("http://user:pass@proxy:3128 (kosong = proxy sistem)")),
                 );
                 ui.end_row();
 
-                ui.label("Header tambahan");
+                ui.label(t("Header tambahan"));
                 ui.vertical(|ui| {
                     let mut remove = None;
                     for (i, (name, value)) in draft.headers.iter_mut().enumerate() {
@@ -339,12 +342,12 @@ impl Profiles {
                             ui.add(
                                 egui::TextEdit::singleline(name)
                                     .desired_width(140.0)
-                                    .hint_text("Nama"),
+                                    .hint_text(t("Nama")),
                             );
                             ui.add(
                                 egui::TextEdit::singleline(value)
                                     .desired_width(200.0)
-                                    .hint_text("Nilai"),
+                                    .hint_text(t("Nilai")),
                             );
                             if ui.small_button("×").clicked() {
                                 remove = Some(i);
@@ -363,7 +366,7 @@ impl Profiles {
                 ui.label("Mode");
                 ui.checkbox(
                     &mut draft.read_only,
-                    "Read-only (blokir semua request yang mengubah data)",
+                    t("Read-only (blokir semua request yang mengubah data)"),
                 );
                 ui.end_row();
             });
@@ -371,7 +374,7 @@ impl Profiles {
         if draft.insecure {
             widgets::warn_box(
                 ui,
-                "Verifikasi TLS dimatikan. Koneksi rentan disadap (MITM).",
+                t("Verifikasi TLS dimatikan. Koneksi rentan disadap (MITM)."),
             );
         }
         if !draft.ca_fingerprint.trim().is_empty()
@@ -391,7 +394,7 @@ impl Profiles {
             if self.test.is_some() {
                 ui.spinner();
             } else if ui
-                .add_enabled(!loading, egui::Button::new("Test koneksi"))
+                .add_enabled(!loading, egui::Button::new(t("Test koneksi")))
                 .clicked()
             {
                 let profile = draft.clone();
@@ -400,7 +403,7 @@ impl Profiles {
                     test_connection(&profile, secret_value.as_deref())
                 }));
             }
-            if ui.button("Simpan").clicked() {
+            if ui.button(t("Simpan")).clicked() {
                 if draft.ephemeral {
                     draft.ephemeral = false;
                     draft.id = Profile::default().id;
@@ -421,21 +424,21 @@ impl Profiles {
                 self.selected = Some(draft.id.clone());
                 events.push(Event::Changed(draft.id.clone()));
             }
-            if !is_new && ui.button("Gunakan").clicked() {
+            if !is_new && ui.button(t("Gunakan")).clicked() {
                 events.push(Event::Activate(draft.id.clone()));
             }
             if !is_new
                 && ui
-                    .add_enabled(!loading, egui::Button::new("Duplikat"))
+                    .add_enabled(!loading, egui::Button::new(t("Duplikat")))
                     .clicked()
             {
                 let mut copy = draft.clone();
                 copy.id = Profile::default().id;
-                copy.name = format!("{} (salinan)", copy.name);
+                copy.name = tf("{0} (salinan)", &[&copy.name]);
                 copy.ephemeral = false;
                 duplicate = Some(copy);
             }
-            if !is_new && !draft.ephemeral && ui.button("Hapus").clicked() {
+            if !is_new && !draft.ephemeral && ui.button(t("Hapus")).clicked() {
                 self.confirm_delete = true;
                 self.confirm_typed.clear();
             }
@@ -463,13 +466,13 @@ impl Profiles {
 
         if self.confirm_delete {
             let Some(draft) = &self.draft else { return };
-            let message = format!(
-                "Profile \"{}\" dan secret-nya di keychain akan dihapus.",
-                draft.name
+            let message = tf(
+                "Profile \"{0}\" dan secret-nya di keychain akan dihapus.",
+                &[&draft.name],
             );
             match widgets::confirm_dialog(
                 ui.ctx(),
-                "Hapus profile?",
+                t("Hapus profile?"),
                 &message,
                 None,
                 &mut self.confirm_typed,
@@ -505,7 +508,7 @@ fn save(
     profile.urls.retain(|u| !u.trim().is_empty());
     profile.headers.retain(|(n, _)| !n.trim().is_empty());
     if profile.urls.is_empty() {
-        return Err("Isi minimal satu URL node.".into());
+        return Err(t("Isi minimal satu URL node.").into());
     }
     match profiles.iter_mut().find(|p| p.id == profile.id) {
         Some(existing) => *existing = profile.clone(),
@@ -523,7 +526,7 @@ fn save(
     {
         secret::set(&profile.id, value, true)?;
     }
-    Ok("Profile disimpan. Secret disimpan di keychain OS.".into())
+    Ok(t("Profile disimpan. Secret disimpan di keychain OS.").into())
 }
 
 /// PRF-16: impor profile dari file ekspor. Selalu diberi id baru; secret diisi ulang manual.
@@ -534,7 +537,7 @@ fn import_profiles(
 ) -> Result<String, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let imported: Vec<Profile> =
-        serde_json::from_str(&text).map_err(|e| format!("File tidak valid: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| tf("File tidak valid: {0}", &[&e]))?;
     let n = imported.len();
     for mut p in imported {
         p.id = Profile::default().id;
@@ -546,8 +549,9 @@ fn import_profiles(
         profiles.push(p);
     }
     store.save_profiles(profiles)?;
-    Ok(format!(
-        "{n} profile diimpor. Isi password/API key di masing-masing profile."
+    Ok(tf(
+        "{0} profile diimpor. Isi password/API key di masing-masing profile.",
+        &[&n],
     ))
 }
 
@@ -555,10 +559,12 @@ fn import_profiles(
 pub fn test_connection(profile: &Profile, secret: Option<&str>) -> Result<String, String> {
     let conn = Arc::new(Conn::new(profile, secret)?);
     let info = conn.get("/")?;
-    let mut text = format!(
-        "Terhubung: cluster {}, versi {}",
-        info["cluster_name"].as_str().unwrap_or("?"),
-        info["version"]["number"].as_str().unwrap_or("?")
+    let mut text = tf(
+        "Terhubung: cluster {0}, versi {1}",
+        &[
+            &info["cluster_name"].as_str().unwrap_or("?"),
+            &info["version"]["number"].as_str().unwrap_or("?"),
+        ],
     );
     if info["version"]["build_flavor"] == "serverless" {
         text.push_str(" (serverless)");
@@ -570,11 +576,102 @@ pub fn test_connection(profile: &Profile, secret: Option<&str>) -> Result<String
             .flatten()
             .filter_map(|r| r.as_str())
             .collect();
-        text.push_str(&format!(
-            ", sebagai {} (roles: {})",
-            me["username"].as_str().unwrap_or("?"),
-            roles.join(", ")
+        text.push_str(&tf(
+            ", sebagai {0} (roles: {1})",
+            &[&me["username"].as_str().unwrap_or("?"), &roles.join(", ")],
         ));
     }
     Ok(text)
+}
+
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("Ekspor…", "Export…"),
+    ("Tanpa password/API key", "Without passwords/API keys"),
+    (
+        "{0} profile diekspor (tanpa secret).",
+        "{0} profiles exported (without secrets).",
+    ),
+    ("Impor…", "Import…"),
+    ("+ Profile baru", "+ New profile"),
+    (
+        "Pilih profile di kiri atau buat profile baru.",
+        "Select a profile on the left or create a new one.",
+    ),
+    ("Profile baru", "New profile"),
+    (
+        "Profile ini berasal dari environment variable (ELASTIC_URL) dan tidak disimpan. Klik \"Simpan\" untuk menjadikannya profile permanen.",
+        "This profile comes from an environment variable (ELASTIC_URL) and is not saved. Click \"Save\" to make it a permanent profile.",
+    ),
+    ("Nama", "Name"),
+    ("URL node", "Node URLs"),
+    ("Node cadangan untuk failover", "Backup node for failover"),
+    ("Autentikasi", "Authentication"),
+    (
+        "•••••• (tersimpan, isi untuk mengganti)",
+        "•••••• (saved, type to replace)",
+    ),
+    ("memuat secret tersimpan…", "loading saved secret…"),
+    ("kosong = CA sistem", "empty = system CA"),
+    ("Fingerprint CA", "CA fingerprint"),
+    (
+        "SHA-256, mis. dari output setup ES (opsional)",
+        "SHA-256, e.g. from the ES setup output (optional)",
+    ),
+    (
+        "Jika diisi, sertifikat server diterima hanya bila fingerprint-nya cocok (menggantikan CA cert).",
+        "If set, the server certificate is accepted only when its fingerprint matches (replaces the CA cert).",
+    ),
+    ("Isi URL", "Fill URL"),
+    (
+        "Lewati verifikasi sertifikat (tidak aman)",
+        "Skip certificate verification (insecure)",
+    ),
+    ("Timeout (detik)", "Timeout (seconds)"),
+    (
+        "http://user:pass@proxy:3128 (kosong = proxy sistem)",
+        "http://user:pass@proxy:3128 (empty = system proxy)",
+    ),
+    ("Header tambahan", "Extra headers"),
+    ("Nilai", "Value"),
+    (
+        "Read-only (blokir semua request yang mengubah data)",
+        "Read-only (block every request that modifies data)",
+    ),
+    (
+        "Verifikasi TLS dimatikan. Koneksi rentan disadap (MITM).",
+        "TLS verification is disabled. The connection is vulnerable to interception (MITM).",
+    ),
+    ("Test koneksi", "Test connection"),
+    ("Gunakan", "Use"),
+    ("Duplikat", "Duplicate"),
+    ("{0} (salinan)", "{0} (copy)"),
+    (
+        "Profile \"{0}\" dan secret-nya di keychain akan dihapus.",
+        "Profile \"{0}\" and its secret in the keychain will be deleted.",
+    ),
+    ("Hapus profile?", "Delete profile?"),
+    ("Isi minimal satu URL node.", "Enter at least one node URL."),
+    (
+        "Profile disimpan. Secret disimpan di keychain OS.",
+        "Profile saved. The secret is stored in the OS keychain.",
+    ),
+    ("File tidak valid: {0}", "Invalid file: {0}"),
+    (
+        "{0} profile diimpor. Isi password/API key di masing-masing profile.",
+        "{0} profiles imported. Enter the password/API key in each profile.",
+    ),
+    (
+        "Terhubung: cluster {0}, versi {1}",
+        "Connected: cluster {0}, version {1}",
+    ),
+    (", sebagai {0} (roles: {1})", ", as {0} (roles: {1})"),
+];
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("profiles.rs"), super::EN);
+    }
 }

@@ -8,6 +8,8 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use eframe::egui::{self, Color32, FontId, RichText, TextFormat, text::LayoutJob};
 use serde_json::Value;
 
+use crate::i18n::{t, tf};
+
 pub const MONO_SIZE: f32 = 13.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -188,7 +190,7 @@ fn json_node(ui: &mut egui::Ui, key: Option<&str>, value: &Value, id: egui::Id, 
                         json_node(ui, Some(k), v, id.with(k), depth + 1);
                     }
                     if map.len() > TREE_LIMIT {
-                        ui.weak(format!("… {} kunci lainnya", map.len() - TREE_LIMIT));
+                        ui.weak(tf("… {0} kunci lainnya", &[&(map.len() - TREE_LIMIT)]));
                     }
                 });
         }
@@ -202,7 +204,7 @@ fn json_node(ui: &mut egui::Ui, key: Option<&str>, value: &Value, id: egui::Id, 
                         json_node(ui, Some(&i.to_string()), v, id.with(i), depth + 1);
                     }
                     if items.len() > TREE_LIMIT {
-                        ui.weak(format!("… {} item lainnya", items.len() - TREE_LIMIT));
+                        ui.weak(tf("… {0} item lainnya", &[&(items.len() - TREE_LIMIT)]));
                     }
                 });
         }
@@ -221,7 +223,7 @@ fn json_node(ui: &mut egui::Ui, key: Option<&str>, value: &Value, id: egui::Id, 
                         egui::Label::new(RichText::new(&text).monospace().color(color))
                             .sense(egui::Sense::click()),
                     )
-                    .on_hover_text("Klik untuk menyalin")
+                    .on_hover_text(t("Klik untuk menyalin"))
                     .clicked()
                 {
                     ui.ctx().copy_text(match leaf {
@@ -276,13 +278,13 @@ pub fn confirm_dialog(
         let mut ok_enabled = true;
         if let Some(expected) = type_to_confirm {
             ui.add_space(6.0);
-            ui.label(format!("Ketik {expected} untuk konfirmasi:"));
+            ui.label(tf("Ketik {0} untuk konfirmasi:", &[&expected]));
             ui.text_edit_singleline(typed);
             ok_enabled = typed.trim() == expected;
         }
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            let text = RichText::new("Lanjutkan");
+            let text = RichText::new(t("Lanjutkan"));
             let text = if danger {
                 text.color(Color32::WHITE)
             } else {
@@ -295,7 +297,7 @@ pub fn confirm_dialog(
             if ui.add_enabled(ok_enabled, button).clicked() {
                 result = Confirm::Yes;
             }
-            if ui.button("Batal").clicked() {
+            if ui.button(t("Batal")).clicked() {
                 result = Confirm::No;
             }
         });
@@ -413,9 +415,23 @@ pub fn format_time_ms(ms: i64) -> String {
         .unwrap_or_else(|| ms.to_string())
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("… {0} kunci lainnya", "… {0} more keys"),
+    ("… {0} item lainnya", "… {0} more items"),
+    ("Klik untuk menyalin", "Click to copy"),
+    ("Ketik {0} untuk konfirmasi:", "Type {0} to confirm:"),
+    ("Lanjutkan", "Continue"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("mod.rs"), EN);
+    }
 
     // NFR: highlight 5.000 baris Console < 50 ms (release).
     #[test]

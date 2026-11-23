@@ -6,6 +6,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+use crate::i18n::{Lang, t, tf};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Env {
     Dev,
@@ -22,7 +24,7 @@ impl Env {
             Env::Dev => "dev",
             Env::Staging => "staging",
             Env::Prod => "prod",
-            Env::Other => "lainnya",
+            Env::Other => t("lainnya"),
         }
     }
 }
@@ -45,7 +47,7 @@ impl AuthKind {
 
     pub fn label(self) -> &'static str {
         match self {
-            AuthKind::None => "Tanpa auth",
+            AuthKind::None => t("Tanpa auth"),
             AuthKind::Basic => "Basic (user/password)",
             AuthKind::ApiKey => "API key",
             AuthKind::Bearer => "Bearer token",
@@ -87,7 +89,7 @@ impl Default for Profile {
     fn default() -> Self {
         Self {
             id: new_id(),
-            name: "Cluster baru".into(),
+            name: t("Cluster baru").into(),
             env: Env::Dev,
             urls: vec!["http://localhost:9200".into()],
             auth: AuthKind::None,
@@ -149,6 +151,13 @@ fn new_id() -> String {
     format!("p{nanos:x}")
 }
 
+/// X-05: preferensi aplikasi di `settings.json`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppSettings {
+    pub lang: Lang,
+}
+
 /// Direktori data aplikasi dan file JSON per profile.
 pub struct Store {
     dir: PathBuf,
@@ -161,6 +170,15 @@ impl Store {
             .unwrap_or_else(|| PathBuf::from(".elastic-gui"));
         let _ = std::fs::create_dir_all(&dir);
         Self { dir }
+    }
+
+    /// File tidak ada atau rusak = pengaturan bawaan.
+    pub fn load_settings(&self) -> AppSettings {
+        read_json(&self.dir.join("settings.json")).unwrap_or_default()
+    }
+
+    pub fn save_settings(&self, settings: &AppSettings) -> Result<(), String> {
+        write_json(&self.dir.join("settings.json"), settings)
     }
 
     pub fn load_profiles(&self) -> Vec<Profile> {
@@ -258,7 +276,10 @@ pub mod secret {
         keyring::Entry::new(SERVICE, profile_id)
             .and_then(|entry| entry.set_password(value))
             .map_err(|e| {
-                format!("Keychain tidak tersedia ({e}). Secret hanya disimpan selama sesi ini.")
+                tf(
+                    "Keychain tidak tersedia ({0}). Secret hanya disimpan selama sesi ini.",
+                    &[&e],
+                )
             })
     }
 
@@ -331,5 +352,52 @@ pub mod secret {
             assert_eq!(lookup(&cache, "b", counting(&calls, None)), None);
             assert_eq!(calls.get(), 1);
         }
+    }
+}
+
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("lainnya", "other"),
+    ("Tanpa auth", "No auth"),
+    ("Cluster baru", "New cluster"),
+    (
+        "Keychain tidak tersedia ({0}). Secret hanya disimpan selama sesi ini.",
+        "Keychain unavailable ({0}). The secret is only kept for this session.",
+    ),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_store(name: &str) -> Store {
+        let dir =
+            std::env::temp_dir().join(format!("elastic-gui-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Store { dir }
+    }
+
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("profile.rs"), EN);
+    }
+
+    #[test]
+    fn settings_tanpa_file_memakai_bawaan() {
+        let store = temp_store("settings-default");
+        assert_eq!(store.load_settings(), AppSettings::default());
+        assert_eq!(store.load_settings().lang, Lang::Id);
+    }
+
+    #[test]
+    fn settings_tersimpan_dan_dimuat_ulang() {
+        let store = temp_store("settings-roundtrip");
+        let settings = AppSettings { lang: Lang::En };
+        store.save_settings(&settings).unwrap();
+        let text = std::fs::read_to_string(store.dir.join("settings.json")).unwrap();
+        assert!(text.contains("\"en\""), "{text}");
+        assert_eq!(store.load_settings(), settings);
+        let _ = std::fs::remove_dir_all(&store.dir);
     }
 }
