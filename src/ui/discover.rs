@@ -16,6 +16,7 @@ use super::{Ctx, Nav};
 use crate::es::Conn;
 use crate::es::catalog::Field;
 use crate::es::query::{self, Filter, QueryMode, TimeBounds};
+use crate::i18n::{t, tf};
 use crate::task::{Pending, poll};
 use crate::widgets::{self, filters, time::TimeRange};
 
@@ -281,7 +282,7 @@ impl Discover {
                         hit["_primary_term"] = term;
                     }
                     self.doc_edit = None;
-                    self.export_result = Some(Ok("Dokumen disimpan.".into()));
+                    self.export_result = Some(Ok(t("Dokumen disimpan.").into()));
                 }
                 Ok(None) => {
                     if row < self.hits.len() {
@@ -291,7 +292,7 @@ impl Discover {
                     if let Some((n, exact)) = self.total {
                         self.total = Some((n.saturating_sub(1), exact));
                     }
-                    self.export_result = Some(Ok("Dokumen dihapus.".into()));
+                    self.export_result = Some(Ok(t("Dokumen dihapus.").into()));
                 }
                 Err(err) => self.export_result = Some(Err(err)),
             }
@@ -464,7 +465,11 @@ impl Discover {
                 self.needs_search = true;
             }
             let busy = self.pending.is_some();
-            if ui.add_enabled(!busy, egui::Button::new("Cari")).clicked() || submitted {
+            if ui
+                .add_enabled(!busy, egui::Button::new(t("Cari")))
+                .clicked()
+                || submitted
+            {
                 cx.catalog.refresh_fields(&self.pattern);
                 self.needs_search = true;
                 let q = self.query.trim().to_owned();
@@ -499,7 +504,7 @@ impl Discover {
             if let Some(body) = &self.last_body
                 && ui
                     .small_button("Inspect")
-                    .on_hover_text("Buka request ini di Dev Tools")
+                    .on_hover_text(t("Buka request ini di Dev Tools"))
                     .clicked()
             {
                 *cx.nav = Some(Nav::Console {
@@ -587,7 +592,7 @@ impl Discover {
                                 clicked = Some(i);
                             }
                         }
-                        ui.weak("↑↓ pilih · Tab terima · Enter cari");
+                        ui.weak(t("↑↓ pilih · Tab terima · Enter cari"));
                     });
                 });
         }
@@ -652,7 +657,7 @@ impl Discover {
                             } else {
                                 v.clone()
                             };
-                        self.suggest.push((quoted, "nilai".into()));
+                        self.suggest.push((quoted, t("nilai").into()));
                     }
                 }
                 None if self.terms_pending.is_none() => {
@@ -696,7 +701,7 @@ impl Discover {
 
     fn sidebar(&mut self, ui: &mut egui::Ui, cx: &mut Ctx, fields: &[Field]) {
         self.saved_ui(ui, cx);
-        ui.label(RichText::new("Sumber data").strong());
+        ui.label(RichText::new(t("Sumber data")).strong());
         let response = ui.add(
             egui::TextEdit::singleline(&mut self.pattern_input)
                 .hint_text("logs-*, alias, data stream")
@@ -729,7 +734,7 @@ impl Discover {
                             && ui
                                 .selectable_label(
                                     false,
-                                    format!("Gunakan pola \"{}\"", self.pattern_input.trim()),
+                                    tf("Gunakan pola \"{0}\"", &[&self.pattern_input.trim()]),
                                 )
                                 .clicked()
                         {
@@ -748,27 +753,27 @@ impl Discover {
                             ui.spinner();
                         }
                     });
-                if ui.small_button("Tutup").clicked() {
+                if ui.small_button(t("Tutup")).clicked() {
                     self.pattern_open = false;
                 }
             });
         }
         if self.pattern.is_empty() {
-            ui.weak("Pilih index, alias, atau data stream.");
+            ui.weak(t("Pilih index, alias, atau data stream."));
             return;
         }
         let dates: Vec<&Field> = fields.iter().filter(|f| f.is_date()).collect();
         ui.horizontal(|ui| {
-            ui.label("Field waktu");
+            ui.label(t("Field waktu"));
             egui::ComboBox::from_id_salt("time_field")
                 .selected_text(
                     self.time_field
                         .clone()
-                        .unwrap_or_else(|| "tanpa waktu".into()),
+                        .unwrap_or_else(|| t("tanpa waktu").into()),
                 )
                 .show_ui(ui, |ui| {
                     let before = self.time_field.clone();
-                    ui.selectable_value(&mut self.time_field, None, "tanpa waktu");
+                    ui.selectable_value(&mut self.time_field, None, t("tanpa waktu"));
                     for f in &dates {
                         ui.selectable_value(&mut self.time_field, Some(f.name.clone()), &f.name);
                     }
@@ -779,13 +784,13 @@ impl Discover {
                 });
         });
         ui.separator();
-        ui.add(egui::TextEdit::singleline(&mut self.field_search).hint_text("Cari field…"));
+        ui.add(egui::TextEdit::singleline(&mut self.field_search).hint_text(t("Cari field…")));
         let needle = self.field_search.to_lowercase();
         egui::ScrollArea::vertical()
             .id_salt("field_list")
             .show(ui, |ui| {
                 if !self.columns.is_empty() {
-                    ui.label(RichText::new("Kolom terpilih").weak());
+                    ui.label(RichText::new(t("Kolom terpilih")).weak());
                     for name in self.columns.clone() {
                         if let Some(f) = fields.iter().find(|f| f.name == name) {
                             self.field_row(ui, f, true);
@@ -794,7 +799,7 @@ impl Discover {
                     ui.separator();
                 }
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Field ({})", fields.len())).weak());
+                    ui.label(RichText::new(tf("Field ({0})", &[&fields.len()])).weak());
                     ui.checkbox(&mut self.field_tree, "tree");
                 });
                 let available: Vec<&Field> = fields
@@ -833,7 +838,7 @@ impl Discover {
 
     fn saved_ui(&mut self, ui: &mut egui::Ui, cx: &mut Ctx) {
         ui.menu_button(
-            format!("⭐ Pencarian tersimpan ({})", self.saved.len()),
+            tf("⭐ Pencarian tersimpan ({0})", &[&self.saved.len()]),
             |ui| {
                 ui.set_min_width(280.0);
                 let mut remove = None;
@@ -854,17 +859,17 @@ impl Discover {
                     });
                 }
                 if self.saved.is_empty() {
-                    ui.weak("Belum ada pencarian tersimpan.");
+                    ui.weak(t("Belum ada pencarian tersimpan."));
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.save_name)
-                            .hint_text("Nama")
+                            .hint_text(t("Nama"))
                             .desired_width(160.0),
                     );
                     let ok = !self.save_name.trim().is_empty() && !self.pattern.is_empty();
-                    if ui.add_enabled(ok, egui::Button::new("Simpan")).clicked() {
+                    if ui.add_enabled(ok, egui::Button::new(t("Simpan"))).clicked() {
                         let name = self.save_name.trim().to_owned();
                         self.saved.retain(|s| s.name != name);
                         self.saved.push(SavedSearch {
@@ -953,20 +958,22 @@ impl Discover {
         if let Some(export) = &mut self.export {
             if let Some(result) = poll(&mut export.pending) {
                 self.export_result = Some(result.map(|(n, path)| {
-                    format!(
-                        "{} baris diekspor ke {path}",
-                        widgets::format_count(n as u64)
+                    tf(
+                        "{0} baris diekspor ke {1}",
+                        &[&widgets::format_count(n as u64), &path],
                     )
                 }));
                 self.export = None;
                 return;
             }
             ui.spinner();
-            ui.weak(format!(
-                "Ekspor {} baris…",
-                widgets::format_count(export.rows.load(Ordering::Relaxed) as u64)
+            ui.weak(tf(
+                "Ekspor {0} baris…",
+                &[&widgets::format_count(
+                    export.rows.load(Ordering::Relaxed) as u64
+                )],
             ));
-            if ui.small_button("Batal").clicked() {
+            if ui.small_button(t("Batal")).clicked() {
                 export.cancel.store(true, Ordering::Relaxed);
             }
             ui.ctx().request_repaint_after(Duration::from_millis(200));
@@ -974,10 +981,10 @@ impl Discover {
         }
         let Some(body) = &self.last_body else { return };
         if !ui
-            .small_button("Ekspor CSV")
-            .on_hover_text(format!(
-                "Maksimal {} baris",
-                widgets::format_count(EXPORT_MAX as u64)
+            .small_button(t("Ekspor CSV"))
+            .on_hover_text(tf(
+                "Maksimal {0} baris",
+                &[&widgets::format_count(EXPORT_MAX as u64)],
             ))
             .clicked()
         {
@@ -1061,9 +1068,9 @@ impl Discover {
                 let list = names.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
                 let more = if names.len() > 5 { ", …" } else { "" };
                 let text = if names.is_empty() {
-                    "Tidak ada index yang cocok.".to_owned()
+                    t("Tidak ada index yang cocok.").to_owned()
                 } else {
-                    format!("Cocok: {} ({list}{more})", names.len())
+                    tf("Cocok: {0} ({1}{2})", &[&names.len(), &list, &more])
                 };
                 let r = ui.weak(text);
                 if names.len() > 5 {
@@ -1084,7 +1091,7 @@ impl Discover {
                 .on_hover_text(f.types.join(" | "));
             if f.types.len() > 1 {
                 ui.label(RichText::new("⚠").color(ui.visuals().warn_fg_color))
-                    .on_hover_text(format!("Konflik tipe antar index: {}", f.types.join(", ")));
+                    .on_hover_text(tf("Konflik tipe antar index: {0}", &[&f.types.join(", ")]));
             }
             let open = self.field_open.as_deref() == Some(f.name.as_str());
             if ui.selectable_label(open, &f.name).clicked() {
@@ -1092,7 +1099,11 @@ impl Discover {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if selected {
-                    if ui.small_button("−").on_hover_text("Hapus kolom").clicked() {
+                    if ui
+                        .small_button("−")
+                        .on_hover_text(t("Hapus kolom"))
+                        .clicked()
+                    {
                         self.columns.retain(|c| c != &f.name);
                     }
                     // DIS-31: urutan kolom (right_to_left, jadi ↓ ditambah lebih dulu).
@@ -1100,20 +1111,24 @@ impl Discover {
                         let last = i + 1 == self.columns.len();
                         if ui
                             .add_enabled(!last, egui::Button::new("↓").small())
-                            .on_hover_text("Geser kolom ke bawah")
+                            .on_hover_text(t("Geser kolom ke bawah"))
                             .clicked()
                         {
                             move_column(&mut self.columns, i, 1);
                         }
                         if ui
                             .add_enabled(i > 0, egui::Button::new("↑").small())
-                            .on_hover_text("Geser kolom ke atas")
+                            .on_hover_text(t("Geser kolom ke atas"))
                             .clicked()
                         {
                             move_column(&mut self.columns, i, -1);
                         }
                     }
-                } else if ui.small_button("+").on_hover_text("Tambah kolom").clicked() {
+                } else if ui
+                    .small_button("+")
+                    .on_hover_text(t("Tambah kolom"))
+                    .clicked()
+                {
                     self.columns.push(f.name.clone());
                 }
             });
@@ -1141,20 +1156,19 @@ impl Discover {
         let mut top: Vec<(String, usize)> = counts.into_iter().collect();
         top.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.weak(format!(
-                "Top 5 dari {} dokumen termuat ({} memiliki field ini)",
-                self.hits.len(),
-                present
+            ui.weak(tf(
+                "Top 5 dari {0} dokumen termuat ({1} memiliki field ini)",
+                &[&self.hits.len(), &present],
             ));
             if top.is_empty() {
-                ui.weak("Tidak ada nilai di dokumen termuat.");
+                ui.weak(t("Tidak ada nilai di dokumen termuat."));
             }
             for (value, count) in top.into_iter().take(5) {
                 let pct = count as f32 / self.hits.len().max(1) as f32;
                 ui.horizontal(|ui| {
                     if ui
                         .small_button("+")
-                        .on_hover_text("Filter nilai ini")
+                        .on_hover_text(t("Filter nilai ini"))
                         .clicked()
                     {
                         self.filters.push(Filter::is(&f.name, &value, false));
@@ -1162,7 +1176,7 @@ impl Discover {
                     }
                     if ui
                         .small_button("−")
-                        .on_hover_text("Kecualikan nilai ini")
+                        .on_hover_text(t("Kecualikan nilai ini"))
                         .clicked()
                     {
                         self.filters.push(Filter::is(&f.name, &value, true));
@@ -1180,8 +1194,8 @@ impl Discover {
                 if self.top_pending.is_some() {
                     ui.spinner();
                 } else if ui
-                    .small_button("Hitung akurat (seluruh rentang)")
-                    .on_hover_text("terms aggregation dengan query dan filter saat ini")
+                    .small_button(t("Hitung akurat (seluruh rentang)"))
+                    .on_hover_text(t("terms aggregation dengan query dan filter saat ini"))
                     .clicked()
                 {
                     self.top_request = Some((f.name.clone(), f.is_numeric()));
@@ -1202,7 +1216,7 @@ impl Discover {
                                     widgets::format_count(st.count)
                                 ));
                             }
-                            ui.weak("Top 5 akurat:");
+                            ui.weak(t("Top 5 akurat:"));
                             for (value, count) in res.terms.clone() {
                                 ui.horizontal(|ui| {
                                     if ui.small_button("+").clicked() {
@@ -1221,7 +1235,7 @@ impl Discover {
                     }
                 }
             }
-            if ui.small_button("Filter: field ada (exists)").clicked() {
+            if ui.small_button(t("Filter: field ada (exists)")).clicked() {
                 self.filters.push(Filter {
                     op: query::FilterOp::Exists,
                     ..Filter::is(&f.name, "", false)
@@ -1239,7 +1253,7 @@ impl Discover {
             widgets::warn_box(ui, warn);
         }
         if self.pattern.is_empty() {
-            ui.weak("Pilih sumber data di panel kiri untuk mulai.");
+            ui.weak(t("Pilih sumber data di panel kiri untuk mulai."));
             return;
         }
         if self.esql {
@@ -1252,17 +1266,20 @@ impl Discover {
                 Some((n, false)) => ui.strong(format!("{}+ hit", widgets::format_count(n))),
                 None => ui.weak("…"),
             };
-            ui.weak(format!("· {} termuat · {} ms", self.hits.len(), self.took));
+            ui.weak(tf(
+                "· {0} termuat · {1} ms",
+                &[&self.hits.len(), &self.took],
+            ));
             self.export_ui(ui, cx, fields);
             if ui
-                .checkbox(&mut self.exact_total, "hitung total akurat")
-                .on_hover_text("track_total_hits: true. Lebih lambat untuk data besar.")
+                .checkbox(&mut self.exact_total, t("hitung total akurat"))
+                .on_hover_text(t("track_total_hits: true. Lebih lambat untuk data besar."))
                 .changed()
             {
                 self.needs_search = true;
             }
-            if let Some(tf) = &self.time_field {
-                ui.weak(format!("· interval {} · {}", self.interval.1, tf));
+            if let Some(tfield) = &self.time_field {
+                ui.weak(tf("· interval {0} · {1}", &[&self.interval.1, tfield]));
             }
         });
         match &self.export_result {
@@ -1275,7 +1292,9 @@ impl Discover {
         if self.searching_async && self.pending.is_some() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.weak("Rentang waktu lebar: query dijalankan sebagai async search di server…");
+                ui.weak(t(
+                    "Rentang waktu lebar: query dijalankan sebagai async search di server…",
+                ));
             });
         }
         if self.time_field.is_some() && !self.buckets.is_empty() {
@@ -1284,9 +1303,9 @@ impl Discover {
                 ui.weak("Breakdown");
                 let before = self.breakdown.clone();
                 egui::ComboBox::from_id_salt("breakdown")
-                    .selected_text(self.breakdown.clone().unwrap_or_else(|| "tanpa".into()))
+                    .selected_text(self.breakdown.clone().unwrap_or_else(|| t("tanpa").into()))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.breakdown, None, "tanpa");
+                        ui.selectable_value(&mut self.breakdown, None, t("tanpa"));
                         for f in fields
                             .iter()
                             .filter(|f| f.aggregatable && !f.is_date() && !f.name.starts_with('_'))
@@ -1472,14 +1491,14 @@ impl Discover {
                         // DIS-31: geser kolom ke kiri/kanan.
                         if ui
                             .add_enabled(idx > 0, egui::Button::new("◀").small())
-                            .on_hover_text("Geser kolom ke kiri")
+                            .on_hover_text(t("Geser kolom ke kiri"))
                             .clicked()
                         {
                             move_click = Some((idx, -1));
                         }
                         if ui
                             .add_enabled(idx + 1 < columns.len(), egui::Button::new("▶").small())
-                            .on_hover_text("Geser kolom ke kanan")
+                            .on_hover_text(t("Geser kolom ke kanan"))
                             .clicked()
                         {
                             move_click = Some((idx, 1));
@@ -1488,20 +1507,21 @@ impl Discover {
                         let text = RichText::new(header_label(c)).strong();
                         if let Some(target) = target {
                             let hint = if target == *c {
-                                "Klik untuk sort".to_owned()
+                                t("Klik untuk sort").to_owned()
                             } else {
-                                format!("Klik untuk sort (memakai {target})")
+                                tf("Klik untuk sort (memakai {0})", &[&target])
                             };
                             if ui.button(text).on_hover_text(hint).clicked() {
                                 sort_click = Some(target);
                             }
                         } else {
-                            ui.label(text).on_hover_text("Field ini tidak bisa di-sort");
+                            ui.label(text)
+                                .on_hover_text(t("Field ini tidak bisa di-sort"));
                         }
                     });
                 }
                 header.col(|ui| {
-                    ui.strong(if columns.is_empty() { "Dokumen" } else { "" });
+                    ui.strong(if columns.is_empty() { t("Dokumen") } else { "" });
                 });
             })
             .body(|body| {
@@ -1560,13 +1580,13 @@ impl Discover {
             ui.horizontal(|ui| {
                 let enabled = self.pending.is_none() && self.pit.is_some();
                 if ui
-                    .add_enabled(enabled, egui::Button::new(format!("Muat {PAGE} lagi")))
+                    .add_enabled(enabled, egui::Button::new(tf("Muat {0} lagi", &[&PAGE])))
                     .clicked()
                 {
                     self.search(ui.ctx(), cx.conn, true);
                 }
                 if self.pit.is_none() {
-                    ui.weak("Paging lanjutan butuh point-in-time (tidak tersedia).");
+                    ui.weak(t("Paging lanjutan butuh point-in-time (tidak tersedia)."));
                 }
             });
         }
@@ -1583,21 +1603,23 @@ impl Discover {
                 hit["_index"].as_str().unwrap_or("?"),
                 hit["_id"].as_str().unwrap_or("?")
             ));
-            ui.selectable_value(&mut self.detail_json, false, "Tabel");
+            ui.selectable_value(&mut self.detail_json, false, t("Tabel"));
             ui.selectable_value(&mut self.detail_json, true, "JSON");
-            if ui.small_button("Salin JSON").clicked() {
+            if ui.small_button(t("Salin JSON")).clicked() {
                 let source = serde_json::to_string_pretty(&hit["_source"]).unwrap_or_default();
                 ui.ctx().copy_text(source);
             }
-            if ui.small_button("Salin _id").clicked() {
+            if ui.small_button(t("Salin _id")).clicked() {
                 ui.ctx()
                     .copy_text(hit["_id"].as_str().unwrap_or_default().to_owned());
             }
             if let Some(tf) = self.time_field.clone()
                 && self.around_pending.is_none()
                 && ui
-                    .small_button("Dokumen sekitar")
-                    .on_hover_text("5 dokumen sebelum dan sesudah berdasarkan waktu (filter aktif tetap berlaku)")
+                    .small_button(t("Dokumen sekitar"))
+                    .on_hover_text(t(
+                        "5 dokumen sebelum dan sesudah berdasarkan waktu (filter aktif tetap berlaku)",
+                    ))
                     .clicked()
             {
                 self.load_around(ui.ctx(), &hit, &tf);
@@ -1611,7 +1633,7 @@ impl Discover {
                     let text = serde_json::to_string_pretty(&hit["_source"]).unwrap_or_default();
                     self.doc_edit = self.selected.map(|i| (i, text));
                 }
-                if ui.small_button("Hapus").clicked() {
+                if ui.small_button(t("Hapus")).clicked() {
                     self.doc_delete = self.selected;
                 }
             }
@@ -1658,7 +1680,7 @@ impl Discover {
                             ui.horizontal(|ui| {
                                 if ui
                                     .small_button("+")
-                                    .on_hover_text("Filter nilai ini")
+                                    .on_hover_text(t("Filter nilai ini"))
                                     .clicked()
                                 {
                                     self.filters.push(Filter::is(&key, &text, false));
@@ -1666,7 +1688,7 @@ impl Discover {
                                 }
                                 if ui
                                     .small_button("−")
-                                    .on_hover_text("Kecualikan nilai ini")
+                                    .on_hover_text(t("Kecualikan nilai ini"))
                                     .clicked()
                                 {
                                     self.filters.push(Filter::is(&key, &text, true));
@@ -1675,7 +1697,7 @@ impl Discover {
                                 let is_col = self.columns.contains(&key);
                                 if ui
                                     .small_button(if is_col { "▣" } else { "▢" })
-                                    .on_hover_text("Tampilkan sebagai kolom")
+                                    .on_hover_text(t("Tampilkan sebagai kolom"))
                                     .clicked()
                                 {
                                     if is_col {
@@ -1789,18 +1811,24 @@ impl Discover {
         if parsed.is_none() {
             ui.colored_label(
                 ui.visuals().error_fg_color,
-                "_source harus objek JSON valid.",
+                t("_source harus objek JSON valid."),
             );
         }
         let mut save = false;
         let mut cancel = false;
         ui.horizontal(|ui| {
-            let label = if self.prod { "Simpan (PROD)" } else { "Simpan" };
+            let label = if self.prod {
+                t("Simpan (PROD)")
+            } else {
+                t("Simpan")
+            };
             save = ui
                 .add_enabled(parsed.is_some(), egui::Button::new(label))
-                .on_hover_text("PUT _doc/<id> dengan if_seq_no/if_primary_term (gagal bila dokumen berubah sejak dimuat)")
+                .on_hover_text(t(
+                    "PUT _doc/<id> dengan if_seq_no/if_primary_term (gagal bila dokumen berubah sejak dimuat)",
+                ))
                 .clicked();
-            cancel = ui.button("Batal").clicked();
+            cancel = ui.button(t("Batal")).clicked();
         });
         ui.separator();
         if cancel {
@@ -1820,17 +1848,22 @@ impl Discover {
     fn doc_delete_ui(&mut self, ctx: &egui::Context, hit: &Value) {
         let Some(row) = self.doc_delete else { return };
         let id = hit["_id"].as_str().unwrap_or_default().to_owned();
-        let message = format!(
-            "Dokumen {id} di {} akan dihapus permanen.\n\nRequest:\nDELETE {}",
-            hit["_index"].as_str().unwrap_or("?"),
-            doc_path(hit)
+        let message = tf(
+            "Dokumen {0} di {1} akan dihapus permanen.\n\nRequest:\nDELETE {2}",
+            &[&id, &hit["_index"].as_str().unwrap_or("?"), &doc_path(hit)],
         );
         let expected = self.prod.then_some(id.as_str());
         let mut typed = ctx
             .data_mut(|d| d.get_temp::<String>(egui::Id::unique("doc_del_typed")))
             .unwrap_or_default();
-        let result =
-            widgets::confirm_dialog(ctx, "Hapus dokumen?", &message, expected, &mut typed, true);
+        let result = widgets::confirm_dialog(
+            ctx,
+            t("Hapus dokumen?"),
+            &message,
+            expected,
+            &mut typed,
+            true,
+        );
         ctx.data_mut(|d| d.insert_temp(egui::Id::unique("doc_del_typed"), typed));
         match result {
             widgets::Confirm::Yes => {
@@ -1850,7 +1883,7 @@ impl Discover {
     fn load_around(&mut self, ctx: &egui::Context, hit: &Value, tf: &str) {
         let id = hit["_id"].as_str().unwrap_or_default().to_owned();
         let Some(ms) = hit_value(hit, tf).and_then(|v| time_ms(&query::display(v))) else {
-            self.around = Some((id, Err("Waktu dokumen tidak bisa dibaca.".into())));
+            self.around = Some((id, Err(t("Waktu dokumen tidak bisa dibaca.").into())));
             return;
         };
         let query = match query::build(QueryMode::Kql, "", &self.filters, None) {
@@ -1902,7 +1935,7 @@ impl Discover {
         };
         match result {
             Ok((newer, older)) => {
-                ui.label(RichText::new("Dokumen sekitar").strong());
+                ui.label(RichText::new(t("Dokumen sekitar")).strong());
                 for hit in newer.iter().rev() {
                     line(ui, hit, false);
                 }
@@ -1977,14 +2010,12 @@ impl Discover {
             ui.spinner();
         }
         let Some(table) = &self.esql_result else {
-            ui.weak("Tulis query ES|QL lalu klik Cari.");
+            ui.weak(t("Tulis query ES|QL lalu klik Cari."));
             return;
         };
-        ui.weak(format!(
-            "{} baris · {} kolom · {} ms",
-            table.rows.len(),
-            table.columns.len(),
-            table.took
+        ui.weak(tf(
+            "{0} baris · {1} kolom · {2} ms",
+            &[&table.rows.len(), &table.columns.len(), &table.took],
         ));
         let mut builder = TableBuilder::new(ui)
             .id_salt("esql_table")
@@ -2048,9 +2079,9 @@ impl Discover {
                 self.pit = page.pit;
                 self.took = page.took;
                 self.warning = (page.failed_shards > 0).then(|| {
-                    format!(
-                        "{} shard gagal: hasil bisa tidak lengkap.",
-                        page.failed_shards
+                    tf(
+                        "{0} shard gagal: hasil bisa tidak lengkap.",
+                        &[&page.failed_shards],
                     )
                 });
             }
@@ -2068,7 +2099,7 @@ fn export_csv(
     rows: &AtomicUsize,
     cancel: &AtomicBool,
 ) -> Result<usize, String> {
-    let file = std::fs::File::create(path).map_err(|e| format!("Gagal membuat file: {e}"))?;
+    let file = std::fs::File::create(path).map_err(|e| tf("Gagal membuat file: {0}", &[&e]))?;
     let mut out = std::io::BufWriter::new(file);
     let header: Vec<String> = columns.iter().map(|c| widgets::csv_cell(c)).collect();
     writeln!(out, "{}", header.join(",")).map_err(|e| e.to_string())?;
@@ -2078,7 +2109,7 @@ fn export_csv(
         None,
     )?["id"]
         .as_str()
-        .ok_or("PIT tidak tersedia untuk ekspor.")?
+        .ok_or(t("PIT tidak tersedia untuk ekspor."))?
         .to_owned();
     // Ambil hanya field yang diekspor: halaman 1.000 dokumen penuh bisa berukuran MB.
     let source: Vec<&String> = columns.iter().filter(|c| !c.starts_with('_')).collect();
@@ -2210,11 +2241,11 @@ fn async_search(
     while value["is_running"] == json!(true) {
         let id = value["id"]
             .as_str()
-            .ok_or("async search tanpa id")?
+            .ok_or(t("async search tanpa id"))?
             .to_owned();
         if cancel.load(Ordering::Relaxed) {
             let _ = conn.json("DELETE", &format!("/_async_search/{id}"), None);
-            return Err("Pencarian dibatalkan.".into());
+            return Err(t("Pencarian dibatalkan.").into());
         }
         value = conn.get(&format!("/_async_search/{id}?{wait}"))?;
     }
@@ -2249,7 +2280,7 @@ fn run_search(conn: &Conn, request: Request) -> Result<Page, String> {
         conn.json("POST", &path, Some(&body))?
     };
     if request.cancel.load(Ordering::Relaxed) {
-        return Err("Pencarian digantikan oleh pencarian baru.".into());
+        return Err(t("Pencarian digantikan oleh pencarian baru.").into());
     }
     let mut series: Vec<(String, Vec<(f64, f64)>)> = Vec::new();
     for b in value["aggregations"]["histogram"]["buckets"]
@@ -2437,8 +2468,155 @@ fn move_column(columns: &mut [String], index: usize, delta: isize) -> bool {
     true
 }
 
+/// X-05: terjemahan English untuk teks di file ini.
+pub const EN: &[(&str, &str)] = &[
+    ("Dokumen disimpan.", "Document saved."),
+    ("Dokumen dihapus.", "Document deleted."),
+    ("Cari", "Search"),
+    (
+        "Buka request ini di Dev Tools",
+        "Open this request in Dev Tools",
+    ),
+    (
+        "↑↓ pilih · Tab terima · Enter cari",
+        "↑↓ select · Tab accept · Enter search",
+    ),
+    ("Sumber data", "Data source"),
+    ("Gunakan pola \"{0}\"", "Use pattern \"{0}\""),
+    ("Tutup", "Close"),
+    (
+        "Pilih index, alias, atau data stream.",
+        "Choose an index, alias, or data stream.",
+    ),
+    ("Field waktu", "Time field"),
+    ("tanpa waktu", "no time"),
+    ("Kolom terpilih", "Selected columns"),
+    ("Field ({0})", "Fields ({0})"),
+    ("⭐ Pencarian tersimpan ({0})", "⭐ Saved searches ({0})"),
+    ("Belum ada pencarian tersimpan.", "No saved searches yet."),
+    ("{0} baris diekspor ke {1}", "{0} rows exported to {1}"),
+    ("Ekspor {0} baris…", "Exporting {0} rows…"),
+    ("Ekspor CSV", "Export CSV"),
+    ("Maksimal {0} baris", "Maximum {0} rows"),
+    ("Tidak ada index yang cocok.", "No matching indices."),
+    ("Cocok: {0} ({1}{2})", "Matches: {0} ({1}{2})"),
+    (
+        "Konflik tipe antar index: {0}",
+        "Type conflict across indices: {0}",
+    ),
+    ("Hapus kolom", "Remove column"),
+    ("Geser kolom ke bawah", "Move column down"),
+    ("Geser kolom ke atas", "Move column up"),
+    ("Tambah kolom", "Add column"),
+    (
+        "Top 5 dari {0} dokumen termuat ({1} memiliki field ini)",
+        "Top 5 of {0} loaded documents ({1} have this field)",
+    ),
+    (
+        "Tidak ada nilai di dokumen termuat.",
+        "No values in the loaded documents.",
+    ),
+    ("Filter nilai ini", "Filter for this value"),
+    ("Kecualikan nilai ini", "Exclude this value"),
+    (
+        "Hitung akurat (seluruh rentang)",
+        "Compute exactly (whole range)",
+    ),
+    (
+        "terms aggregation dengan query dan filter saat ini",
+        "terms aggregation with the current query and filters",
+    ),
+    ("Top 5 akurat:", "Exact top 5:"),
+    ("Filter: field ada (exists)", "Filter: field exists"),
+    (
+        "Pilih sumber data di panel kiri untuk mulai.",
+        "Choose a data source in the left panel to start.",
+    ),
+    ("· {0} termuat · {1} ms", "· {0} loaded · {1} ms"),
+    ("hitung total akurat", "exact total count"),
+    (
+        "track_total_hits: true. Lebih lambat untuk data besar.",
+        "track_total_hits: true. Slower on large data.",
+    ),
+    ("· interval {0} · {1}", "· interval {0} · {1}"),
+    (
+        "Rentang waktu lebar: query dijalankan sebagai async search di server…",
+        "Wide time range: the query runs as an async search on the server…",
+    ),
+    ("tanpa", "none"),
+    ("Geser kolom ke kiri", "Move column left"),
+    ("Geser kolom ke kanan", "Move column right"),
+    ("Klik untuk sort", "Click to sort"),
+    ("Klik untuk sort (memakai {0})", "Click to sort (using {0})"),
+    (
+        "Field ini tidak bisa di-sort",
+        "This field cannot be sorted",
+    ),
+    ("Dokumen", "Document"),
+    ("Muat {0} lagi", "Load {0} more"),
+    (
+        "Paging lanjutan butuh point-in-time (tidak tersedia).",
+        "Further paging needs point-in-time (not available).",
+    ),
+    ("Tabel", "Table"),
+    ("Salin JSON", "Copy JSON"),
+    ("Salin _id", "Copy _id"),
+    ("Dokumen sekitar", "Surrounding documents"),
+    (
+        "5 dokumen sebelum dan sesudah berdasarkan waktu (filter aktif tetap berlaku)",
+        "5 documents before and after by time (active filters still apply)",
+    ),
+    ("Tampilkan sebagai kolom", "Show as column"),
+    (
+        "_source harus objek JSON valid.",
+        "_source must be a valid JSON object.",
+    ),
+    ("Simpan (PROD)", "Save (PROD)"),
+    (
+        "PUT _doc/<id> dengan if_seq_no/if_primary_term (gagal bila dokumen berubah sejak dimuat)",
+        "PUT _doc/<id> with if_seq_no/if_primary_term (fails if the document changed since it was loaded)",
+    ),
+    (
+        "Dokumen {0} di {1} akan dihapus permanen.\n\nRequest:\nDELETE {2}",
+        "Document {0} in {1} will be permanently deleted.\n\nRequest:\nDELETE {2}",
+    ),
+    ("Hapus dokumen?", "Delete document?"),
+    (
+        "Waktu dokumen tidak bisa dibaca.",
+        "The document time could not be read.",
+    ),
+    (
+        "Tulis query ES|QL lalu klik Cari.",
+        "Write an ES|QL query, then click Search.",
+    ),
+    (
+        "{0} baris · {1} kolom · {2} ms",
+        "{0} rows · {1} columns · {2} ms",
+    ),
+    (
+        "{0} shard gagal: hasil bisa tidak lengkap.",
+        "{0} shards failed: results may be incomplete.",
+    ),
+    ("Gagal membuat file: {0}", "Failed to create file: {0}"),
+    (
+        "PIT tidak tersedia untuk ekspor.",
+        "PIT is not available for export.",
+    ),
+    ("async search tanpa id", "async search without id"),
+    ("Pencarian dibatalkan.", "Search cancelled."),
+    (
+        "Pencarian digantikan oleh pencarian baru.",
+        "Search replaced by a newer search.",
+    ),
+];
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("discover.rs"), super::EN);
+    }
+
     use super::*;
 
     fn cols(v: &[&str]) -> Vec<String> {

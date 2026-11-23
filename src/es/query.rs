@@ -172,10 +172,13 @@ pub fn build(
                 json!({"query_string": {"query": text, "analyze_wildcard": true}})
             }
             QueryMode::Dsl => {
-                let value: Value =
-                    serde_json::from_str(text).map_err(|e| format!("DSL tidak valid: {e}"))?;
+                let value: Value = serde_json::from_str(text)
+                    .map_err(|e| crate::i18n::tf("DSL tidak valid: {0}", &[&e]))?;
                 if !value.is_object() {
-                    return Err("DSL harus berupa objek query, mis. {\"match_all\": {}}".into());
+                    return Err(crate::i18n::t(
+                        "DSL harus berupa objek query, mis. {\"match_all\": {}}",
+                    )
+                    .into());
                 }
                 value
             }
@@ -346,7 +349,15 @@ pub fn display(value: &Value) -> String {
 }
 
 /// X-05: terjemahan English untuk teks di file ini.
-pub const EN: &[(&str, &str)] = &[("salah satu dari", "is one of"), ("di antara", "between")];
+pub const EN: &[(&str, &str)] = &[
+    ("salah satu dari", "is one of"),
+    ("di antara", "between"),
+    ("DSL tidak valid: {0}", "Invalid DSL: {0}"),
+    (
+        "DSL harus berupa objek query, mis. {\"match_all\": {}}",
+        "DSL must be a query object, e.g. {\"match_all\": {}}",
+    ),
+];
 
 #[cfg(test)]
 mod tests {

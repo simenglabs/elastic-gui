@@ -5,6 +5,7 @@
 //! `field:(a or b)`, `nested:{ sub:x }`, teks bebas, `and`/`or`/`not`, kurung.
 //! Dua klausa berdampingan tanpa operator dianggap `and`.
 
+use crate::i18n::{t, tf};
 use serde_json::{Value, json};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,7 +64,7 @@ fn lex(input: &str) -> Result<Vec<(Tok, usize)>, String> {
                 i += 1;
                 loop {
                     match chars.get(i) {
-                        None => return Err(format!("KQL: kutip tidak ditutup (posisi {start})")),
+                        None => return Err(tf("KQL: kutip tidak ditutup (posisi {0})", &[&start])),
                         Some('"') => break,
                         Some('\\') if i + 1 < chars.len() => {
                             i += 1;
@@ -145,8 +146,11 @@ impl Parser {
 
     fn error(&self, what: &str) -> String {
         match self.toks.get(self.pos) {
-            Some((tok, at)) => format!("KQL: {what}, ditemukan {tok:?} di posisi {at}"),
-            None => format!("KQL: {what}, tetapi query sudah berakhir"),
+            Some((tok, at)) => tf(
+                "KQL: {0}, ditemukan {1} di posisi {2}",
+                &[&what, &format!("{tok:?}"), at],
+            ),
+            None => tf("KQL: {0}, tetapi query sudah berakhir", &[&what]),
         }
     }
 
@@ -200,7 +204,7 @@ impl Parser {
             (Some(Tok::LParen), _) => {
                 self.pos += 1;
                 let inner = self.or_expr(prefix)?;
-                self.expect(Tok::RParen, "diharapkan ')'")?;
+                self.expect(Tok::RParen, t("diharapkan ')'"))?;
                 Ok(inner)
             }
             (Some(Tok::Word(w)), Some(Tok::Colon)) if !w.quoted => {
@@ -209,7 +213,7 @@ impl Parser {
                 if self.peek() == Some(&Tok::LBrace) {
                     self.pos += 1;
                     let inner = self.or_expr(&format!("{field}."))?;
-                    self.expect(Tok::RBrace, "diharapkan '}'")?;
+                    self.expect(Tok::RBrace, t("diharapkan '}'"))?;
                     return Ok(
                         json!({"nested": {"path": field, "query": inner, "score_mode": "none"}}),
                     );
@@ -222,11 +226,11 @@ impl Parser {
                 self.pos += 2;
                 let value = self
                     .take_word()
-                    .ok_or_else(|| self.error("diharapkan nilai setelah operator range"))?;
+                    .ok_or_else(|| self.error(t("diharapkan nilai setelah operator range")))?;
                 Ok(json!({"range": {field: {op: value.text}}}))
             }
             (Some(Tok::Word(_)), _) => Ok(free_text(&self.words())),
-            _ => Err(self.error("diharapkan field, nilai, atau '('")),
+            _ => Err(self.error(t("diharapkan field, nilai, atau '('"))),
         }
     }
 
@@ -260,12 +264,12 @@ impl Parser {
             let inner = self.value_or(field);
             self.group_depth -= 1;
             let inner = inner?;
-            self.expect(Tok::RParen, "diharapkan ')'")?;
+            self.expect(Tok::RParen, t("diharapkan ')'"))?;
             return Ok(inner);
         }
         let words = self.words();
         if words.is_empty() {
-            return Err(self.error(&format!("diharapkan nilai untuk field {field}")));
+            return Err(self.error(&tf("diharapkan nilai untuk field {0}", &[&field])));
         }
         Ok(field_value(field, &words))
     }
@@ -372,13 +376,49 @@ pub fn to_dsl(input: &str) -> Result<Value, String> {
     };
     let value = p.or_expr("")?;
     if p.pos < p.toks.len() {
-        return Err(p.error("token tidak terduga"));
+        return Err(p.error(t("token tidak terduga")));
     }
     Ok(value)
 }
 
+/// X-05: terjemahan English untuk pesan error parser KQL.
+pub const EN: &[(&str, &str)] = &[
+    (
+        "KQL: kutip tidak ditutup (posisi {0})",
+        "KQL: unclosed quote (position {0})",
+    ),
+    (
+        "KQL: {0}, ditemukan {1} di posisi {2}",
+        "KQL: {0}, found {1} at position {2}",
+    ),
+    (
+        "KQL: {0}, tetapi query sudah berakhir",
+        "KQL: {0}, but the query ended",
+    ),
+    ("diharapkan ')'", "expected ')'"),
+    ("diharapkan '}'", "expected '}'"),
+    (
+        "diharapkan nilai setelah operator range",
+        "expected a value after the range operator",
+    ),
+    (
+        "diharapkan field, nilai, atau '('",
+        "expected a field, a value, or '('",
+    ),
+    (
+        "diharapkan nilai untuk field {0}",
+        "expected a value for field {0}",
+    ),
+    ("token tidak terduga", "unexpected token"),
+];
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn semua_teks_diterjemahkan() {
+        crate::i18n::assert_translated(include_str!("kql.rs"), super::EN);
+    }
+
     use super::*;
 
     fn q(s: &str) -> Value {

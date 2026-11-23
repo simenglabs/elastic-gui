@@ -66,6 +66,8 @@ const TABLES: &[&[(&str, &str)]] = &[
     crate::widgets::filters::EN,
     crate::es::catalog::EN,
     crate::es::query::EN,
+    crate::es::kql::EN,
+    crate::ui::discover::EN,
     crate::ui::console::EN,
 ];
 
