@@ -1,0 +1,8 @@
+/target/
+.DS_Store
+
+# Kredensial lokal (jangan di-commit)
+.example
+.env
+# Workspace subagent-driven development
+.superpowers/
